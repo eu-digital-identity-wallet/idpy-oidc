@@ -122,7 +122,7 @@ class Claims(ImpExp):
 
         return keyjar, _uri_path
 
-    def get_base_url(self, configuration: dict, entity_id: Optional[str]=""):
+    def get_base_url(self, configuration: dict):
         raise NotImplementedError()
 
     def get_id(self, configuration: dict):
@@ -134,10 +134,7 @@ class Claims(ImpExp):
     def get_jwks(self, keyjar):
         return keyjar.export_jwks()
 
-    def handle_keys(self,
-                    configuration: dict,
-                    keyjar: Optional[KeyJar] = None,
-                    entity_id: Optional[str] = ""):
+    def handle_keys(self, configuration: dict, keyjar: Optional[KeyJar] = None):
         _jwks = _jwks_uri = None
         _id = self.get_id(configuration)
         keyjar, uri_path = self._keyjar(keyjar, configuration, entity_id=_id)
@@ -150,7 +147,7 @@ class Claims(ImpExp):
         if "jwks_uri" in configuration:  # simple
             _jwks_uri = configuration.get("jwks_uri")
         elif uri_path:
-            _base_url = self.get_base_url(configuration, entity_id=entity_id)
+            _base_url = self.get_base_url(configuration)
             _jwks_uri = add_path(_base_url, uri_path)
         else:  # jwks or nothing
             _jwks = self.get_jwks(keyjar)
@@ -158,11 +155,7 @@ class Claims(ImpExp):
         return {"keyjar": keyjar, "jwks": _jwks, "jwks_uri": _jwks_uri}
 
     def load_conf(
-            self,
-            configuration: dict,
-            supports: dict,
-            keyjar: Optional[KeyJar] = None,
-            entity_id: Optional[str] = ""
+            self, configuration: dict, supports: dict, keyjar: Optional[KeyJar] = None
     ) -> KeyJar:
         for attr, val in configuration.items():
             if attr in ["preference", "capabilities"]:
@@ -174,7 +167,7 @@ class Claims(ImpExp):
 
         self.locals(configuration)
 
-        for key, val in self.handle_keys(configuration, keyjar=keyjar, entity_id=entity_id).items():
+        for key, val in self.handle_keys(configuration, keyjar=keyjar).items():
             if key == "keyjar":
                 keyjar = val
             elif val:
@@ -219,3 +212,4 @@ class Claims(ImpExp):
             return default
         else:
             return _val
+

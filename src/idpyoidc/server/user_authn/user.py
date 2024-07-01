@@ -20,6 +20,8 @@ from idpyoidc.server.exception import OnlyForTestingWarning
 from idpyoidc.time_util import utc_time_sans_frac
 from idpyoidc.util import instantiate
 
+from urllib.parse import parse_qs, urlparse
+
 __author__ = "Roland Hedberg"
 
 logger = logging.getLogger(__name__)
@@ -166,7 +168,6 @@ class UserPassJinja2(UserAuthnMethod):
         verify_endpoint="",
         **kwargs,
     ):
-
         super(UserPassJinja2, self).__init__(upstream_get=upstream_get)
         self.template_handler = template_handler
         self.template = template
@@ -230,7 +231,6 @@ class UserPass(UserAuthnMethod):
         upstream_get=None,
         **kwargs,
     ):
-
         super(UserPass, self).__init__(upstream_get=upstream_get)
         self.user_db = instantiate(db_conf["class"], **db_conf["kwargs"])
 
@@ -276,7 +276,6 @@ class BasicAuthn(UserAuthnMethod):
 
 
 class SymKeyAuthn(UserAuthnMethod):
-
     # user authentication using a token
 
     def __init__(self, ttl, symkey, upstream_get=None):
@@ -311,7 +310,6 @@ class SymKeyAuthn(UserAuthnMethod):
 
 
 class NoAuthn(UserAuthnMethod):
-
     # Just for testing allows anyone it without authentication
 
     def __init__(self, user, upstream_get=None):
@@ -335,6 +333,156 @@ class NoAuthn(UserAuthnMethod):
             res.update(self.cookie_info(cookie, client_id))
 
         return res, utc_time_sans_frac()
+
+
+class PidIssuerAuth(object):
+    url_endpoint = "/verify"
+    FAILED_AUTHN = (None, True)
+
+    def __init__(self, upstream_get=None, **kwargs):
+        self.query_param = "upm_answer"
+        self.upstream_get = upstream_get
+        self.kwargs = kwargs
+
+    def __call__(self, **kwargs):
+        """
+        Display user interaction.
+
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        logger.info("User Authorization Args:", kwargs)
+        cfgoidc = kwargs["oidc_config"]
+
+        kwargs.pop("oidc_config")
+
+        if not self.upstream_get:
+            raise Exception(f"{self.__class__.__name__} doesn't have a working upstream_get")
+        _context = self.upstream_get("context")
+        _keyjar = self.upstream_get("attribute", "keyjar")
+        # Stores information need afterwards in a signed JWT that then
+        # appears as a hidden input in the form
+        jws = create_signed_jwt(_context.issuer, _keyjar, **kwargs)
+        _kwargs = self.kwargs.copy()
+        for attr in ["policy", "tos", "logo"]:
+            _uri = "{}_uri".format(attr)
+            try:
+                _kwargs[_uri] = kwargs[_uri]
+            except KeyError:
+                pass
+            else:
+                _label = "{}_label".format(attr)
+                _kwargs[_label] = LABELS[_uri]
+
+        url = kwargs["query"]
+        query_params = parse_qs(url)
+
+        args = {}
+        if "authorization_details" in query_params:
+            args.update({"authorization_details": query_params.get("authorization_details")[0]})
+
+        if "scope" in query_params:
+            scope = query_params.get("scope", [None])[0]
+            scope = scope.split()
+            args.update({"scope": scope})
+
+        if not args:
+            return {
+                "error": "invalid_authentication",
+                "error_description": "No authorization details or scope found.",
+                "token": jws,
+            }
+
+        url = cfgoidc.country_redirect["dynamic"]
+        _resp = {
+            "url": url,
+            "token": jws,
+        }
+        _resp.update(args)
+
+        return _resp
+
+    def authenticated_as(self, client_id, cookie=None, **kwargs):
+        if cookie is None:
+            return None, 0
+        else:
+            _info = self.cookie_info(cookie, client_id)
+            if _info:
+                logger.debug("authenticated_as: cookie info={}".format(_info))
+                if "max_age" in kwargs and kwargs["max_age"] != 0:
+                    _max_age = kwargs["max_age"]
+                    _now = utc_time_sans_frac()
+                    if _now > _info["timestamp"] + _max_age:
+                        logger.debug(
+                            "Too old by {} seconds".format(_now - (_info["timestamp"] + _max_age))
+                        )
+                        return None, 0
+            else:
+                logger.info("Failed to find session based on cookie")
+
+            return _info, utc_time_sans_frac()
+
+    def verify(self, *args, **kwargs):
+        """
+        Callback to verify user input
+        :return: username of the authenticated user
+        """
+        username = kwargs["username"]
+        return username
+
+    def cookie_info(self, cookie: List[dict], client_id: str) -> dict:
+        _context = self.upstream_get("context")
+        logger.debug("Value cookies: {}".format(cookie))
+
+        if cookie is None:
+            pass
+        else:
+            for val in cookie:
+                _info = json.loads(val["value"])
+                _info["timestamp"] = int(val["timestamp"])
+
+                # verify session ID
+                try:
+                    _context.session_manager[_info["sid"]]
+                except (
+                    KeyError,
+                    ValueError,
+                    InconsistentDatabase,
+                    NoSuchClientSession,
+                    NoSuchGrant,
+                ) as err:
+                    logger.info(f"Verifying session ID fail due to {err}")
+                    return {}
+
+                session_id = _context.session_manager.decrypt_session_id(_info["sid"])
+                logger.debug("cookie_info: session id={}".format(session_id))
+
+                if session_id[1] != client_id:
+                    continue
+                else:
+                    _info["uid"] = session_id[0]
+                    _info["grant_id"] = session_id[2]
+                    return _info
+        return {}
+
+    def unpack_token(self, token):
+        return verify_signed_jwt(token=token, keyjar=self.upstream_get("context").keyjar)
+
+
+import urllib.parse
+
+
+def url_get(url_path: str, args: dict):
+    """Returns the URL for a HTTP GET query
+
+    Keyword arguments:
+    + url_path -- URL without the GET parameters
+    + args -- dictionary of parameters (key: value)
+
+    Return: URL for a HTTP GET query
+    """
+    return url_path + "?" + urllib.parse.urlencode(args)
 
 
 def factory(cls, **kwargs):

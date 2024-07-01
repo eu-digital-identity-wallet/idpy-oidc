@@ -18,16 +18,14 @@ from idpyoidc.claims import Claims
 from idpyoidc.claims import claims_dump
 from idpyoidc.claims import claims_load
 from idpyoidc.client.claims.oauth2 import Claims as OAUTH2_Specs
-from idpyoidc.client.claims.oauth2resource import Claims as OAUTH2RESOURCE_Specs
 from idpyoidc.client.claims.oidc import Claims as OIDC_Specs
 from idpyoidc.client.configure import Configuration
 from idpyoidc.util import rndstr
-
-from ..impexp import ImpExp
 from .claims.transform import preferred_to_registered
 from .claims.transform import supported_to_preferred
 from .configure import get_configuration
 from .current import Current
+from ..impexp import ImpExp
 
 logger = logging.getLogger(__name__)
 
@@ -134,21 +132,19 @@ class ServiceContext(ImpExp):
             self.claims = OIDC_Specs()
         elif client_type == "oauth2":
             self.claims = OAUTH2_Specs()
-        elif client_type == "oauth2resource":
-            self.claims = OAUTH2RESOURCE_Specs()
         else:
             raise ValueError(f"Unknown client type: {client_type}")
 
-        self.entity_id = kwargs.get("entity_id", kwargs.get("client_id", ""))
-        if not self.entity_id:
-            self.entity_id = config.conf.get("entity_id", config.conf.get("client_id"))
-
+        if "client_id" in kwargs:
+            self.entity_id = kwargs["entity_id"]
+        else:
+            self.entity_id = config.conf.get("client_id", "")
         self.cstate = cstate or Current()
 
         self.kid = {"sig": {}, "enc": {}}
 
         self.allow = config.conf.get("allow", {})
-        self.base_url = base_url or config.conf.get("base_url", self.entity_id)
+        self.base_url = base_url or config.conf.get("base_url", "")
         self.provider_info = config.conf.get("provider_info", {})
 
         # Below so my IDE won't complain
@@ -159,7 +155,6 @@ class ServiceContext(ImpExp):
         self.httpc_params = {}
         self.client_secret_expires_at = 0
         self.registration_response = {}
-        self.client_authn_methods = {}
 
         # _def_value = copy.deepcopy(DEFAULT_VALUE)
 
@@ -177,21 +172,17 @@ class ServiceContext(ImpExp):
         for key, val in kwargs.items():
             setattr(self, key, val)
 
-        self.keyjar = self.claims.load_conf(config.conf, supports=self.supports(), keyjar=keyjar,
-                                            entity_id=self.entity_id)
+        self.keyjar = self.claims.load_conf(config.conf, supports=self.supports(), keyjar=keyjar)
 
-        _jwks_uri = self.provider_info.get("jwks_uri")
+        _jwks_uri = self.provider_info.get('jwks_uri')
         if _jwks_uri:
-            self.keyjar.load_keys(self.provider_info.get("issuer"), jwks_uri=_jwks_uri)
+            self.keyjar.load_keys(self.provider_info.get('issuer'), jwks_uri=_jwks_uri)
 
         _response_types = self.get_preference(
             "response_types_supported", self.supports().get("response_types_supported", [])
         )
 
         self.construct_uris(response_types=_response_types)
-
-        self.map_supported_to_preferred()
-        self.map_preferred_to_registered()
 
     def __setitem__(self, key, value):
         setattr(self, key, value)

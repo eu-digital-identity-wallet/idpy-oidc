@@ -12,13 +12,12 @@ from idpyoidc.server.authn_event import AuthnEvent
 from idpyoidc.server.session.token import TOKEN_MAP
 from idpyoidc.server.token import Token as TokenHandler
 from idpyoidc.util import importer
-
-from ...message.oauth2 import TokenExchangeRequest
-from ...util import qualified_name
 from . import MintingNotAllowed
 from .claims import claims_match
 from .token import Item
 from .token import SessionToken
+from ...message.oauth2 import TokenExchangeRequest
+from ...util import qualified_name
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +143,8 @@ class Grant(Item):
         self.extra = extra or {}
         self.remember_token = remember_token
         self.remove_inactive_token = remove_inactive_token
+        self.notification_ids = []
+        self.transaction_ids = {}
 
         if token_map is None:
             self.token_map = TOKEN_MAP
@@ -157,6 +158,18 @@ class Grant(Item):
             authorization_details=self.authorization_details,
             resources=self.resources,
         )
+
+    def add_notification(self, notification_id):
+        self.notification_ids.append(notification_id)
+
+    def add_transaction(self, transaction_id, credential_response):
+        self.transaction_ids.update({transaction_id: credential_response})
+
+    def remove_notification(self, notification_id):
+        self.notification_ids.remove(notification_id)
+
+    def remove_transaction(self, transaction_id):
+        self.transaction_ids.pop(transaction_id)
 
     def find_scope(self, based_on):
         if isinstance(based_on, str):
@@ -314,11 +327,7 @@ class Grant(Item):
         for param in ["audience", "aud"]:
             _val = class_args.get(param)
             if _val:
-                if isinstance(_val, list):
-                    _aud = _aud.union(set(_val))
-                else:
-                    _val = [_val]
-                    _aud = _aud.union(set(_val))
+                _aud = _aud.union(set(_val))
                 del class_args[param]
 
         if _aud != set():

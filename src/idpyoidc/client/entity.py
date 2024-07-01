@@ -141,10 +141,11 @@ class Entity(Unit):  # This is a Client. What type is undefined here.
                 keyjar=self.keyjar,
                 upstream_get=self.unit_get,
                 client_type=client_type,
-                entity_id=self.entity_id,
+                entity_id=self.entity_id
             )
 
         self.setup_client_authn_methods(config)
+
         self.upstream_get = upstream_get
 
     def get_services(self, *arg):
@@ -169,8 +170,8 @@ class Entity(Unit):  # This is a Client. What type is undefined here.
 
         return None
 
-    # def get_entity(self):
-    #     return self
+    def get_entity(self):
+        return self
 
     def get_client_id(self):
         _val = self.context.claims.get_usage("client_id")
@@ -215,4 +216,4 @@ class Entity(Unit):  # This is a Client. What type is undefined here.
         return _keyjar
 
     def get_callback_uris(self):
-        return self.context.claims.get_preference("callback_uris")
+        return self.context.claims.callback_uri

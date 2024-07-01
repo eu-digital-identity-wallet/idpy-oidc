@@ -1,11 +1,11 @@
 import json
 import time
 
-import pytest
-import responses
 from cryptojwt.utils import as_bytes
-
+import pytest
 import requests
+import responses
+
 from idpyoidc.client.entity import Entity
 from idpyoidc.message.oidc import RegistrationResponse
 

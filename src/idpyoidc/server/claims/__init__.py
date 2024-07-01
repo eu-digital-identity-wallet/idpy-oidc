@@ -4,13 +4,10 @@ from idpyoidc import claims
 
 
 class Claims(claims.Claims):
-    def get_base_url(self, configuration: dict, entity_id: Optional[str] = ""):
+    def get_base_url(self, configuration: dict):
         _base = configuration.get("base_url")
         if not _base:
-            if entity_id:
-                _base = entity_id
-            else:
-                _base = configuration.get("issuer")
+            _base = configuration.get("issuer")
 
         return _base
 

@@ -414,7 +414,7 @@ class AuthorizationRequest(oauth2.AuthorizationRequest):
     c_param = oauth2.AuthorizationRequest.c_param.copy()
     c_param.update(
         {
-            "scope": REQUIRED_LIST_OF_SP_SEP_STRINGS,
+            "scope": OPTIONAL_LIST_OF_SP_SEP_STRINGS,
             "redirect_uri": SINGLE_REQUIRED_STRING,
             "nonce": SINGLE_OPTIONAL_STRING,
             "display": SINGLE_OPTIONAL_STRING,
@@ -504,8 +504,8 @@ class AuthorizationRequest(oauth2.AuthorizationRequest):
                 except KeyError:
                     pass
 
-        if "openid" not in self.get("scope", []):
-            raise MissingRequiredValue("openid not in scope", self)
+        # if "openid" not in self.get("scope", []):
+        #    raise MissingRequiredValue("openid not in scope", self)
 
         if "offline_access" in self.get("scope", []):
             if "prompt" not in self or "consent" not in self["prompt"]:

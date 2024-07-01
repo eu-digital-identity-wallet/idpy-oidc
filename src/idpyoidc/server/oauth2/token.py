@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Optional
 from typing import Union
@@ -13,7 +14,6 @@ from idpyoidc.server.exception import ProcessError
 from idpyoidc.server.oauth2.token_helper import TokenEndpointHelper
 from idpyoidc.server.session import MintingNotAllowed
 from idpyoidc.util import importer
-
 from .token_helper.access_token import AccessTokenHelper
 from .token_helper.client_credentials import ClientCredentials
 from .token_helper.refresh_token import RefreshTokenHelper
@@ -174,6 +174,13 @@ class Token(Endpoint):
             _access_token, grant=True, handler_key=_handler_key
         )
 
+        if "authorization_details" in _session_info["grant"].authorization_request:
+            authorization_details = json.loads(
+                _session_info["grant"].authorization_request["authorization_details"]
+            )
+
+            response_args["authorization_details"] = authorization_details
+
         _cookie = _context.new_cookie(
             name=_context.cookie_handler.name["session"],
             sub=_session_info["grant"].sub,
@@ -191,4 +198,4 @@ class Token(Endpoint):
         return resp
 
     def supports(self):
-        return self._supports
+        return {"grant_types_supported": list(self.grant_type_helper.keys())}

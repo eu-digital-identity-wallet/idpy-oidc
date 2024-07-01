@@ -105,6 +105,3 @@ class Current(ImpExp):
         _key = self.create_key()
         self._db[_key] = kwargs
         return _key
-
-    def keys(self):
-        return self._db.keys()

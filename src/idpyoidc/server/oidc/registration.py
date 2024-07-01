@@ -4,7 +4,6 @@ import json
 import logging
 import secrets
 from typing import List
-from typing import Optional
 from urllib.parse import urlencode
 from urllib.parse import urlparse
 
@@ -284,7 +283,12 @@ class Registration(Endpoint):
         # if it can't load keys because the URL is false it will
         # just silently fail. Waiting for better times.
         _keyjar.load_keys(client_id, jwks_uri=t["jwks_uri"], jwks=t["jwks"])
-        logger.debug(f"Keys for {client_id}: {_keyjar.key_summary(client_id)}")
+
+        n_keys = 0
+        for kb in _keyjar.get(client_id, []):
+            n_keys += len(kb.keys())
+        msg = "found {} keys for client_id={}"
+        logger.debug(msg.format(n_keys, client_id))
 
         return _cinfo
 
@@ -306,6 +310,8 @@ class Registration(Endpoint):
                 if p.scheme not in ["http", "https"]:  # Custom scheme
                     _custom = True
                 elif p.scheme == "http" and p.hostname in ["localhost", "127.0.0.1"]:
+                    pass
+                elif p.scheme == "https":
                     pass
                 else:
                     logger.error(
@@ -399,10 +405,7 @@ class Registration(Endpoint):
 
         return client_secret
 
-    def client_registration_setup(self, request,
-                                  new_id: Optional[bool] = True,
-                                  set_secret: Optional[bool] = True,
-                                  reserved_client_id: Optional[list] = None):
+    def client_registration_setup(self, request, new_id=True, set_secret=True):
         try:
             request.verify()
         except (MessageException, ValueError) as err:
@@ -432,9 +435,7 @@ class Registration(Endpoint):
             else:
                 cid_generator = importer("idpyoidc.server.oidc.registration.random_client_id")
                 cid_gen_kwargs = {}
-            if not reserved_client_id:
-                reserved_client_id = _context.cdb.keys()
-            client_id = cid_generator(reserved=reserved_client_id, **cid_gen_kwargs)
+            client_id = cid_generator(reserved=_context.cdb.keys(), **cid_gen_kwargs)
             if "client_id" in request:
                 del request["client_id"]
         else:
@@ -489,9 +490,7 @@ class Registration(Endpoint):
 
     def process_request(self, request=None, new_id=True, set_secret=True, **kwargs):
         try:
-            reserved_client_id = kwargs.get("reserved")
-            reg_resp = self.client_registration_setup(request, new_id, set_secret,
-                                                      reserved_client_id)
+            reg_resp = self.client_registration_setup(request, new_id, set_secret)
         except Exception as err:
             logger.error("client_registration_setup: %s", request)
             return ResponseMessage(
@@ -517,3 +516,60 @@ class Registration(Endpoint):
                     _error = "invalid_client_claims"
 
         return self.error_cls(error=_error, error_description=f"{exception}")
+
+    def process_request_authorization(self, client_id, client_secret, redirect_uri):
+        logger.info("Starting Registration process request authorization")
+
+        args = {
+            "application_type": "native",
+            "response_types": ["code"],
+            "redirect_uris": [redirect_uri],
+            "grant_types": ["authorization_code"],
+            "subject_type": "public",
+            "id_token_signed_response_alg": "ES256",
+            "userinfo_signed_response_alg": "ES256",
+            "request_object_signing_alg": "ES256",
+            "token_endpoint_auth_method": "public",
+            "token_endpoint_auth_signing_alg": "ES256",
+            "default_max_age": 86400,
+            "response_modes": ["query", "fragment", "form_post"],
+        }
+
+        _context = self.upstream_get("context")
+
+        if not client_id:
+            raise ValueError("Missing client_id")
+
+        _cinfo = {"client_id": client_id, "client_salt": rndstr(8)}
+        _cinfo["client_secret"] = client_secret
+        _eat = self.client_secret_expiration_time()
+        if _eat:
+            _cinfo["client_secret_expires_at"] = _eat
+
+        _context.cdb[client_id] = _cinfo
+        _cinfo = self.do_client_registration(
+            args,
+            client_id,
+            ignore=["redirect_uris", "policy_uri", "logo_uri", "tos_uri"],
+        )
+
+        if isinstance(_cinfo, ResponseMessage):
+            return _cinfo
+
+        # Add the client_secret as a symmetric key to the key jar
+        if client_secret:
+            self.upstream_get("attribute", "keyjar").add_symmetric(client_id, str(client_secret))
+
+        logger.debug("Stored updated client info in CDB under cid={}".format(client_id))
+        logger.info("ClientInfo: {}".format(_cinfo))
+        _context.cdb[client_id] = _cinfo
+
+        # Not all databases can be sync'ed
+        if hasattr(_context.cdb, "sync") and callable(_context.cdb.sync):
+            _context.cdb.sync()
+
+        _context = self.upstream_get("context")
+        _cookie = _context.new_cookie(
+            name=_context.cookie_handler.name["register"],
+            client_id=client_id,
+        )

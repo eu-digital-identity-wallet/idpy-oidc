@@ -19,6 +19,7 @@ from idpyoidc.server.client_authn import client_auth_setup
 from idpyoidc.server.configure import OPConfiguration
 from idpyoidc.server.scopes import SCOPE2CLAIMS
 from idpyoidc.server.scopes import Scopes
+from idpyoidc.server.session.manager import create_session_manager
 from idpyoidc.server.session.manager import SessionManager
 from idpyoidc.server.template_handler import Jinja2TemplateHandler
 from idpyoidc.server.user_authn.authn_context import populate_authn_broker
@@ -87,7 +88,7 @@ class EndpointContext(OidcContext):
         "jwks_uri": "",
         "keyjar": KeyJar,
         "login_hint_lookup": None,
-        "login_hint2acrs": None,
+        "login_hint2acrs": {},
         "par_db": {},
         "provider_info": {},
         "registration_access_token": {},
@@ -104,16 +105,16 @@ class EndpointContext(OidcContext):
     init_args = ["upstream_get", "conf"]
 
     def __init__(
-            self,
-            conf: Union[dict, OPConfiguration],
-            upstream_get: Callable,
-            cwd: Optional[str] = "",
-            cookie_handler: Optional[Any] = None,
-            httpc: Optional[Any] = None,
-            server_type: Optional[str] = "",
-            entity_id: Optional[str] = "",
-            keyjar: Optional[KeyJar] = None,
-            claims_class: Optional[Claims] = None,
+        self,
+        conf: Union[dict, OPConfiguration],
+        upstream_get: Callable,
+        cwd: Optional[str] = "",
+        cookie_handler: Optional[Any] = None,
+        httpc: Optional[Any] = None,
+        server_type: Optional[str] = "",
+        entity_id: Optional[str] = "",
+        keyjar: Optional[KeyJar] = None,
+        claims_class: Optional[Claims] = None,
     ):
         _id = entity_id or conf.get("issuer", "")
         OidcContext.__init__(self, conf, entity_id=_id)
@@ -232,7 +233,7 @@ class EndpointContext(OidcContext):
         self.dev_auth_db = None
         _interface = conf.get("claims_interface")
         if _interface:
-            self.claims_interface = init_service(_interface, self.unit_get)
+            self.claims_interface = init_service(_interface, self.upstream_get)
 
         if isinstance(conf, OPConfiguration):
             conf = conf.conf
@@ -249,10 +250,8 @@ class EndpointContext(OidcContext):
         self.setup_authentication()
 
         self.session_manager = SessionManager(
-            self.token_handler_args,
-            sub_func=self._sub_func,
-            conf=conf,
-            upstream_get=self.unit_get)
+            self.token_handler_args, sub_func=self._sub_func, conf=conf, upstream_get=self.unit_get
+        )
 
         self.do_userinfo()
 
@@ -274,8 +273,9 @@ class EndpointContext(OidcContext):
             return authz.Implicit(self.unit_get)
 
     def setup_client_authn_methods(self):
-        self.client_authn_methods = client_auth_setup(self.unit_get,
-                                                      self.conf.get("client_authn_methods"))
+        self.client_authn_methods = client_auth_setup(
+            self.upstream_get, self.conf.get("client_authn_methods")
+        )
 
     def setup_login_hint_lookup(self):
         _conf = self.conf.get("login_hint_lookup")
@@ -304,10 +304,10 @@ class EndpointContext(OidcContext):
         if _spec:
             _kwargs = _spec.get("kwargs", {})
             _cls = importer(_spec["class"])
-            self.scopes_handler = _cls(self.unit_get, **_kwargs)
+            self.scopes_handler = _cls(self.upstream_get, **_kwargs)
         else:
             self.scopes_handler = Scopes(
-                self.unit_get,
+                self.upstream_get,
                 allowed_scopes=self.conf.get("allowed_scopes"),
                 scopes_to_claims=self.conf.get("scopes_to_claims"),
             )
@@ -437,7 +437,7 @@ class EndpointContext(OidcContext):
         _conf = self.conf.get("authentication")
         if _conf:
             self.authn_broker = populate_authn_broker(
-                _conf, self.unit_get, self.template_handler
+                _conf, self.upstream_get, self.template_handler
             )
         else:
             self.authn_broker = {}

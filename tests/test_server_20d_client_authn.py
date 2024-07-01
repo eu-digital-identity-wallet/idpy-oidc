@@ -1,13 +1,13 @@
 import base64
 from unittest.mock import MagicMock
 
-import pytest
 from cryptojwt.jws.exception import NoSuitableSigningKeys
 from cryptojwt.jwt import JWT
 from cryptojwt.key_jar import KeyJar
 from cryptojwt.key_jar import build_keyjar
 from cryptojwt.utils import as_bytes
 from cryptojwt.utils import as_unicode
+import pytest
 
 from idpyoidc.defaults import JWT_BEARER
 from idpyoidc.server import Server
@@ -358,7 +358,7 @@ class TestJWSAuthnMethod:
     def test_jws_authn_method_aud_not_me(self):
         client_keyjar = KeyJar()
         client_keyjar.import_jwks(KEYJAR.export_jwks(private=True), CONF["issuer"])
-        # The only own key the client has at this point
+        # The only own key the client has a this point
         client_keyjar.add_symmetric("", client_secret, ["sig"])
 
         _jwt = JWT(client_keyjar, iss=client_id, sign_alg="HS256")

@@ -169,6 +169,7 @@ CLIENT_CONFIG = {
 
 
 class Flow(object):
+
     def __init__(self, client, server):
         self.client = client
         self.server = server
