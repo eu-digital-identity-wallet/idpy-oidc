@@ -1,6 +1,6 @@
+from datetime import datetime
 import json
 import logging
-from datetime import datetime
 from typing import Callable
 from typing import Optional
 from typing import Union
@@ -35,9 +35,9 @@ class UserInfo(Endpoint):
     _supports = {
         "claim_types_supported": ["normal", "aggregated", "distributed"],
         "encrypt_userinfo_supported": True,
-        "userinfo_signing_alg_values_supported": metadata.get_signing_algs(),
-        "userinfo_encryption_alg_values_supported": metadata.get_encryption_algs(),
-        "userinfo_encryption_enc_values_supported": metadata.get_encryption_encs(),
+        "userinfo_signing_alg_values_supported": metadata.get_signing_algs,
+        "userinfo_encryption_alg_values_supported": metadata.get_encryption_algs,
+        "userinfo_encryption_enc_values_supported": metadata.get_encryption_encs,
     }
 
     def __init__(
@@ -64,7 +64,6 @@ class UserInfo(Endpoint):
         client_id: Optional[str] = "",
         **kwargs,
     ) -> dict:
-
         if "error" in kwargs and kwargs["error"]:
             return Endpoint.do_response(self, response_args, request, **kwargs)
 
@@ -117,6 +116,7 @@ class UserInfo(Endpoint):
         return {"response": resp, "http_headers": http_headers}
 
     def process_request(self, request=None, **kwargs):
+        print("\n Reached process request\n")
         _mngr = self.upstream_get("context").session_manager
         try:
             _session_info = _mngr.get_session_info_by_token(
@@ -151,8 +151,8 @@ class UserInfo(Endpoint):
             # if "offline_access" in session["authn_req"]["scope"]:
             #     pass
 
-        _cntxt = self.upstream_get("context")
         if allowed:
+            _cntxt = self.upstream_get("context")
             _claims_restriction = _cntxt.claims_interface.get_claims(
                 _session_info["branch_id"], scopes=token.scope, claims_release_point="userinfo"
             )
@@ -163,15 +163,16 @@ class UserInfo(Endpoint):
             if _grant.add_acr_value("userinfo"):
                 info["acr"] = _grant.authentication_event["authn_info"]
 
-            extra_claims = kwargs.get("extra_claims")
-            if extra_claims:
-                info.update(extra_claims)
+            if "userinfo" in _cntxt.cdb[request["client_id"]]:
+                self.config["policy"] = _cntxt.cdb[request["client_id"]]["userinfo"]["policy"]
 
-        if "userinfo" in _cntxt.cdb[request["client_id"]]:
-            self.config["policy"] = _cntxt.cdb[request["client_id"]]["userinfo"]["policy"]
-
-        if "policy" in self.config:
-            info = self._enforce_policy(request, info, token, self.config)
+            if "policy" in self.config:
+                info = self._enforce_policy(request, info, token, self.config)
+        else:
+            info = {
+                "error": "invalid_request",
+                "error_description": "Access not granted",
+            }
 
         return {"response_args": info, "client_id": _session_info["client_id"]}
 

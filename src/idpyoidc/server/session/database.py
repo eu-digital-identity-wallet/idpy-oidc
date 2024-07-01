@@ -15,10 +15,8 @@ from idpyoidc.server.constant import DIVIDER
 from idpyoidc.server.util import lv_pack
 from idpyoidc.server.util import lv_unpack
 from idpyoidc.util import rndstr
-
 from .grant import Grant
 from .info import NodeInfo
-from ...util import instantiate
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +28,8 @@ class Database(ImpExp):
         ImpExp.__init__(self)
         self.db = DLDict()
 
-        # for k, v in kwargs.items():
-        #     setattr(self, k, v)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
         if crypt_config is None:
             crypt_config = default_crypt_config()
@@ -185,6 +183,5 @@ class Database(ImpExp):
         self.db = DLDict()
 
     def local_load_adjustments(self, **kwargs):
-        self.crypt = instantiate(self.crypt_config["class"], **self.crypt_config["kwargs"])
-        # _crypt = init_encrypter(self.crypt_config)
-        # self.crypt = _crypt["encrypter"]
+        _crypt = init_encrypter(self.crypt_config)
+        self.crypt = _crypt["encrypter"]

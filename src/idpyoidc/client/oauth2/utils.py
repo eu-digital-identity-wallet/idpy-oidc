@@ -28,7 +28,7 @@ def pick_redirect_uri(
     context,
     request_args: Optional[Union[Message, dict]] = None,
     response_type: Optional[str] = "",
-    response_mode: Optional[str] = "",
+    response_mode: Optional[str] = ""
 ):
     if request_args is None:
         request_args = {}
@@ -76,12 +76,8 @@ def pick_redirect_uri(
         if redirect_uris:
             redirect_uri = redirect_uris[0]
         else:
-            redirect_uris = context.get_preference("redirect_uris", [])
-            if redirect_uris:
-                redirect_uri = redirect_uris[0]
-            else:
-                logger.error("No redirect_uri")
-                raise MissingRequiredAttribute("redirect_uri")
+            logger.error("No redirect_uri")
+            raise MissingRequiredAttribute("redirect_uri")
 
     return redirect_uri
 

@@ -1,4 +1,3 @@
-import base64
 import importlib
 import json
 import logging
@@ -12,8 +11,8 @@ from urllib.parse import unquote_plus
 from urllib.parse import urlsplit
 from urllib.parse import urlunsplit
 
-from cryptojwt.utils import importer
 import yaml
+from cryptojwt.utils import importer
 
 logger = logging.getLogger(__name__)
 
@@ -106,16 +105,6 @@ class PassThru:
 
     def deserialize(self, str):
         return str
-
-
-class Base64(object):
-    @staticmethod
-    def serialize(str):
-        return base64.b64encode(str.encode("utf-8")).decode("utf-8")
-
-    @staticmethod
-    def deserialize(str):
-        return base64.b64decode(str.encode("utf-8")).decode("utf-8")
 
 
 def get_http_params(config):

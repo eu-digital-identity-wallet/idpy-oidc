@@ -42,3 +42,7 @@ class TestSessionManagerPairWiseID:
 class TestSessionManagerPublicID:
     pw = PublicID()
     pw("diana", "that-sector")
+
+
+class TestSessionManagerConf:
+    sman = SessionManager(handler=TokenHandler(), conf={"password": "hola!"})

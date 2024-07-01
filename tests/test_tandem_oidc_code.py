@@ -1,8 +1,9 @@
 import json
 import os
 
-import pytest
 from cryptojwt.key_jar import build_keyjar
+
+import pytest
 
 from idpyoidc.client.oidc import RP
 from idpyoidc.message.oauth2 import is_error_message

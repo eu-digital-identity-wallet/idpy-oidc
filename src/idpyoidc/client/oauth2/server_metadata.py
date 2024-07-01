@@ -38,7 +38,7 @@ class ServerMetadata(Service):
         :return: Service endpoint
         """
         try:
-            _iss = self.upstream_get("attribute","issuer")
+            _iss = self.upstream_get("context").issuer
         except AttributeError:
             _iss = self.endpoint
 
@@ -72,16 +72,13 @@ class ServerMetadata(Service):
 
         # In some cases we can live with the two URLs not being
         # the same. But this is an excepted that has to be explicit
-        _allow = self.upstream_get("attribute", "allow")
-        if _allow:
-            _allowed = _allow.get("issuer_mismatch", None)
-            if _allowed:
-                return _issuer
-
-        if _issuer != _pcr_issuer:
-            raise OidcServiceError(
-                "provider info issuer mismatch '%s' != '%s'" % (_issuer, _pcr_issuer)
-            )
+        try:
+            self.upstream_get("context").allow["issuer_mismatch"]
+        except KeyError:
+            if _issuer != _pcr_issuer:
+                raise OidcServiceError(
+                    "provider info issuer mismatch '%s' != '%s'" % (_issuer, _pcr_issuer)
+                )
         return _issuer
 
     def _set_endpoints(self, resp):
@@ -124,35 +121,16 @@ class ServerMetadata(Service):
         try:
             _keyjar = self.upstream_get("attribute", "keyjar")
             if _keyjar is None:
-                LOGGER.debug("No existing KeyJar")
                 _keyjar = KeyJar()
         except KeyError:
             _keyjar = KeyJar()
 
-        _loaded = False
         # Load the keys. Note that this only means that the key specification
         # is loaded not necessarily that any keys are fetched.
         if "jwks_uri" in resp:
-            LOGGER.debug(f"'jwks_uri' in provider info: {resp['jwks_uri']}")
-            _hp = self.upstream_get("attribute","httpc_params")
-            if _hp:
-                if "verify" in _hp and "verify" not in _keyjar.httpc_params:
-                    _keyjar.httpc_params["verify"] = _hp["verify"]
             _keyjar.load_keys(_pcr_issuer, jwks_uri=resp["jwks_uri"])
-            _loaded = True
         elif "jwks" in resp:
-            LOGGER.debug("'jwks' in provider info")
             _keyjar.load_keys(_pcr_issuer, jwks=resp["jwks"])
-            _loaded = True
-        else:
-            LOGGER.debug("Neither jws or jwks_uri in provider info")
-
-        if _loaded:
-            LOGGER.debug(f"loaded keys for: {_pcr_issuer}")
-            LOGGER.debug(f"keys = {_keyjar.key_summary(_pcr_issuer)}")
-            LOGGER.debug(f"{_keyjar}")
-        else:
-            LOGGER.debug(f"Did not load any keys for {_pcr_issuer}")
 
         # Combine what I prefer/supports with what the Provider supports
         if isinstance(resp, Message):

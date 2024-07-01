@@ -1,9 +1,9 @@
 from urllib.parse import parse_qs
 from urllib.parse import urlparse
 
-from cryptojwt.key_jar import build_keyjar
 import pytest
 import responses
+from cryptojwt.key_jar import build_keyjar
 
 from idpyoidc.client.defaults import DEFAULT_KEY_DEFS
 from idpyoidc.client.rp_handler import RPHandler
@@ -14,6 +14,7 @@ BASE_URL = "https://example.com"
 
 
 class TestRPHandler(object):
+
     @pytest.fixture(autouse=True)
     def rphandler_setup(self):
         self.rph = RPHandler(BASE_URL)
@@ -38,32 +39,20 @@ class TestRPHandler(object):
         assert set(_context.claims.prefer.keys()) == {
             'application_type',
             'callback_uris',
-            'default_max_age',
-            'encrypt_request_object_supported',
-            'encrypt_userinfo_supported',
-            'grant_types_supported',
             'id_token_encryption_alg_values_supported',
             'id_token_encryption_enc_values_supported',
-            'id_token_signing_alg_values_supported',
             'jwks_uri',
             'redirect_uris',
             'request_object_encryption_alg_values_supported',
             'request_object_encryption_enc_values_supported',
-            'request_object_signing_alg_values_supported',
-            'response_modes_supported',
-            'response_types_supported',
             'scopes_supported',
-            'subject_types_supported',
-            'token_endpoint_auth_methods_supported',
-            'token_endpoint_auth_signing_alg_values_supported',
             'userinfo_encryption_alg_values_supported',
-            'userinfo_encryption_enc_values_supported',
-            'userinfo_signing_alg_values_supported'}
+            'userinfo_encryption_enc_values_supported'}
 
         _keyjar = client.get_attribute("keyjar")
         assert list(_keyjar.owners()) == ["", BASE_URL]
         keys = _keyjar.get_issuer_keys("")
-        assert len(keys) == 2
+        assert len(keys) == 4
 
         assert _context.base_url == BASE_URL
 
