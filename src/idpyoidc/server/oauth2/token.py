@@ -14,6 +14,7 @@ from idpyoidc.server.exception import ProcessError
 from idpyoidc.server.oauth2.token_helper import TokenEndpointHelper
 from idpyoidc.server.session import MintingNotAllowed
 from idpyoidc.util import importer
+
 from .token_helper.access_token import AccessTokenHelper
 from .token_helper.client_credentials import ClientCredentials
 from .token_helper.refresh_token import RefreshTokenHelper
@@ -198,4 +199,4 @@ class Token(Endpoint):
         return resp
 
     def supports(self):
-        return {"grant_types_supported": list(self.grant_type_helper.keys())}
+        return self._supports

@@ -1,4 +1,5 @@
 """Implements the service that can exchange one token for another."""
+
 import logging
 from typing import Optional
 

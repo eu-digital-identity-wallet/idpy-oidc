@@ -19,7 +19,6 @@ from idpyoidc.server.client_authn import client_auth_setup
 from idpyoidc.server.configure import OPConfiguration
 from idpyoidc.server.scopes import SCOPE2CLAIMS
 from idpyoidc.server.scopes import Scopes
-from idpyoidc.server.session.manager import create_session_manager
 from idpyoidc.server.session.manager import SessionManager
 from idpyoidc.server.template_handler import Jinja2TemplateHandler
 from idpyoidc.server.user_authn.authn_context import populate_authn_broker
@@ -30,8 +29,10 @@ from idpyoidc.util import rndstr
 logger = logging.getLogger(__name__)
 
 
-def init_user_info(conf, cwd: str):
+def init_user_info(conf, cwd: str, upstream_get: Optional[Callable] = None):
     kwargs = conf.get("kwargs", {})
+    if upstream_get:
+        kwargs["upstream_get"] = upstream_get
 
     if isinstance(conf["class"], str):
         return importer(conf["class"])(**kwargs)
@@ -88,7 +89,7 @@ class EndpointContext(OidcContext):
         "jwks_uri": "",
         "keyjar": KeyJar,
         "login_hint_lookup": None,
-        "login_hint2acrs": {},
+        "login_hint2acrs": None,
         "par_db": {},
         "provider_info": {},
         "registration_access_token": {},
@@ -233,7 +234,7 @@ class EndpointContext(OidcContext):
         self.dev_auth_db = None
         _interface = conf.get("claims_interface")
         if _interface:
-            self.claims_interface = init_service(_interface, self.upstream_get)
+            self.claims_interface = init_service(_interface, self.unit_get)
 
         if isinstance(conf, OPConfiguration):
             conf = conf.conf
@@ -274,7 +275,7 @@ class EndpointContext(OidcContext):
 
     def setup_client_authn_methods(self):
         self.client_authn_methods = client_auth_setup(
-            self.upstream_get, self.conf.get("client_authn_methods")
+            self.unit_get, self.conf.get("client_authn_methods")
         )
 
     def setup_login_hint_lookup(self):
@@ -304,10 +305,10 @@ class EndpointContext(OidcContext):
         if _spec:
             _kwargs = _spec.get("kwargs", {})
             _cls = importer(_spec["class"])
-            self.scopes_handler = _cls(self.upstream_get, **_kwargs)
+            self.scopes_handler = _cls(self.unit_get, **_kwargs)
         else:
             self.scopes_handler = Scopes(
-                self.upstream_get,
+                self.unit_get,
                 allowed_scopes=self.conf.get("allowed_scopes"),
                 scopes_to_claims=self.conf.get("scopes_to_claims"),
             )
@@ -337,7 +338,7 @@ class EndpointContext(OidcContext):
         _conf = self.conf.get("userinfo")
         if _conf:
             if self.session_manager:
-                self.userinfo = init_user_info(_conf, self.cwd)
+                self.userinfo = init_user_info(_conf, self.cwd, upstream_get=self.unit_get)
                 self.session_manager.userinfo = self.userinfo
             else:
                 logger.warning("Cannot init_user_info if no session manager was provided.")
@@ -436,9 +437,7 @@ class EndpointContext(OidcContext):
     def setup_authentication(self):
         _conf = self.conf.get("authentication")
         if _conf:
-            self.authn_broker = populate_authn_broker(
-                _conf, self.upstream_get, self.template_handler
-            )
+            self.authn_broker = populate_authn_broker(_conf, self.unit_get, self.template_handler)
         else:
             self.authn_broker = {}
 

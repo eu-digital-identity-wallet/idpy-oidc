@@ -17,17 +17,15 @@ from idpyoidc.server.oauth2.token import Token
 SERVER_CONFIG = {
     "issuer": "https://example.net/",
     "httpc_params": {"verify": False},
-    "preference": {
-        "grant_types_supported": ["client_credentials", "password"]
-    },
-    "keys": {"uri_path": "jwks.json", "key_defs": KEYDEFS, 'read_only': False},
+    "preference": {"grant_types_supported": ["client_credentials", "password"]},
+    "keys": {"uri_path": "jwks.json", "key_defs": KEYDEFS, "read_only": False},
     "endpoint": {
         "token": {
             "path": "token",
             "class": Token,
             "kwargs": {
                 "client_authn_method": ["client_secret_basic", "client_secret_post"],
-            }
+            },
         }
     },
     "token_handler_args": {
@@ -37,8 +35,8 @@ SERVER_CONFIG = {
             "kwargs": {
                 "lifetime": 3600,
                 "aud": ["https://example.org/appl"],
-            }
-        }
+            },
+        },
     },
     "client_authn": verify_client,
     "claims_interface": {
@@ -62,31 +60,27 @@ CLIENT_CONFIG = {
     "client_id": "client_1",
     "client_secret": "another password",
     "base_url": "https://example.com",
-    'services': {
+    "services": {
         "client_credentials": {
             "class": "idpyoidc.client.oauth2.client_credentials.CCAccessTokenRequest"
         }
-    }
+    },
 }
 
 # Client side
 
 client = Client(config=CLIENT_CONFIG)
 
-client_credentials_service = client.get_service('client_credentials')
+client_credentials_service = client.get_service("client_credentials")
 client_credentials_service.endpoint = "https://example.com/token"
 
 # Server side
 
 server = Server(ASConfiguration(conf=SERVER_CONFIG, base_path=BASEDIR), cwd=BASEDIR)
 server.context.cdb["client_1"] = {
-    "client_secret": CLIENT_CONFIG['client_secret'],
+    "client_secret": CLIENT_CONFIG["client_secret"],
     "allowed_scopes": ["resourceA"],
 }
 
 flow = Flow(client, server)
-msg = flow(
-    [
-        ["client_credentials", 'token']
-    ]
-)
+msg = flow([["client_credentials", "token"]])

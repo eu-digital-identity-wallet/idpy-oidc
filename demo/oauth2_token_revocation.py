@@ -35,17 +35,17 @@ server_conf["authz"]["kwargs"] = {
         "expires_in": 43200,
     }
 }
-server_conf['token_handler_args']["refresh"] = {
+server_conf["token_handler_args"]["refresh"] = {
     "class": "idpyoidc.server.token.jwt_token.JWTToken",
     "kwargs": {
         "lifetime": 3600,
         "aud": ["https://example.org/appl"],
-    }
+    },
 }
-server_conf['endpoint'] = {
-    'discovery': {
-        'path': "/.well-known/oauth-authorization-server",
-        'class': "idpyoidc.server.oauth2.server_metadata.ServerMetadata",
+server_conf["endpoint"] = {
+    "discovery": {
+        "path": "/.well-known/oauth-authorization-server",
+        "class": "idpyoidc.server.oauth2.server_metadata.ServerMetadata",
         "kwargs": {},
     },
     "authorization": {
@@ -59,14 +59,14 @@ server_conf['endpoint'] = {
         "kwargs": {},
     },
     "token_revocation": {
-        'path': 'revocation',
+        "path": "revocation",
         "class": "idpyoidc.server.oauth2.token_revocation.TokenRevocation",
         "kwargs": {},
     },
-    'introspection': {
-        'path': 'introspection',
-        'class': "idpyoidc.server.oauth2.introspection.Introspection"
-    }
+    "introspection": {
+        "path": "introspection",
+        "class": "idpyoidc.server.oauth2.introspection.Introspection",
+    },
 }
 
 server = Server(ASConfiguration(conf=server_conf, base_path=BASEDIR), cwd=BASEDIR)
@@ -74,18 +74,14 @@ server = Server(ASConfiguration(conf=server_conf, base_path=BASEDIR), cwd=BASEDI
 # ================ Client side ===================================
 
 client_conf = CLIENT_CONFIG.copy()
-client_conf['issuer'] = SERVER_CONF['issuer']
-client_conf['key_conf'] = {'key_defs': KEYDEFS}
+client_conf["issuer"] = SERVER_CONF["issuer"]
+client_conf["key_conf"] = {"key_defs": KEYDEFS}
 client_conf["services"] = {
     "metadata": {"class": "idpyoidc.client.oauth2.server_metadata.ServerMetadata"},
     "authorization": {"class": "idpyoidc.client.oauth2.authorization.Authorization"},
     "access_token": {"class": "idpyoidc.client.oauth2.access_token.AccessToken"},
-    'token_revocation': {
-        'class': 'idpyoidc.client.oauth2.token_revocation.TokenRevocation'
-    },
-    'introspection': {
-        'class': 'idpyoidc.client.oauth2.introspection.Introspection'
-    }
+    "token_revocation": {"class": "idpyoidc.client.oauth2.token_revocation.TokenRevocation"},
+    "introspection": {"class": "idpyoidc.client.oauth2.introspection.Introspection"},
 }
 client_conf["allowed_scopes"] = ["profile", "offline_access", "foobar"]
 
@@ -93,8 +89,8 @@ client = Client(config=client_conf)
 
 # ==== What the server needs to know about the client.
 
-server.context.cdb[CLIENT_ID] = {k: v for k, v in CLIENT_CONFIG.items() if k not in ['services']}
-server.context.cdb[CLIENT_ID]['allowed_scopes'] = client_conf['allowed_scopes']
+server.context.cdb[CLIENT_ID] = {k: v for k, v in CLIENT_CONFIG.items() if k not in ["services"]}
+server.context.cdb[CLIENT_ID]["allowed_scopes"] = client_conf["allowed_scopes"]
 
 server.context.keyjar.import_jwks(client.keyjar.export_jwks(), CLIENT_ID)
 
@@ -107,14 +103,14 @@ server.context.set_provider_info()
 flow = Flow(client, server)
 msg = flow(
     [
-        ['server_metadata', 'server_metadata'],
-        ['authorization', 'authorization'],
-        ["accesstoken", 'token'],
-        ['introspection', 'introspection'],
-        ['token_revocation', 'token_revocation'],
-        ['introspection', 'introspection'],
+        ["server_metadata", "server_metadata"],
+        ["authorization", "authorization"],
+        ["accesstoken", "token"],
+        ["introspection", "introspection"],
+        ["token_revocation", "token_revocation"],
+        ["introspection", "introspection"],
     ],
-    scope=['foobar'],
-    server_jwks=server.keyjar.export_jwks(''),
-    server_jwks_uri=server.context.provider_info['jwks_uri']
+    scope=["foobar"],
+    server_jwks=server.keyjar.export_jwks(""),
+    server_jwks_uri=server.context.provider_info["jwks_uri"],
 )

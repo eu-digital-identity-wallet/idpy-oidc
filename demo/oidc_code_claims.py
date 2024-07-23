@@ -27,16 +27,16 @@ server = Server(OPConfiguration(conf=server_conf, base_path=BASEDIR), cwd=BASEDI
 # ================ Client side ===================================
 
 client_conf = CLIENT_CONFIG.copy()
-client_conf['issuer'] = SERVER_CONF['issuer']
-client_conf['key_conf'] = {'key_defs': KEYDEFS}
-client_conf["allowed_scopes"] = ["foobar", "openid", 'offline_access']
+client_conf["issuer"] = SERVER_CONF["issuer"]
+client_conf["key_conf"] = {"key_defs": KEYDEFS}
+client_conf["allowed_scopes"] = ["foobar", "openid", "offline_access"]
 
 client = RP(config=client_conf)
 
 # ==== What the server needs to know about the client.
 
 server.context.cdb[CLIENT_ID] = CLIENT_CONFIG
-server.context.cdb[CLIENT_ID]['allowed_scopes'] = client_conf["allowed_scopes"]
+server.context.cdb[CLIENT_ID]["allowed_scopes"] = client_conf["allowed_scopes"]
 server.context.keyjar.import_jwks(client.keyjar.export_jwks(), CLIENT_ID)
 
 # Initiating the server's metadata
@@ -46,20 +46,20 @@ server.context.set_provider_info()
 flow = Flow(client, server)
 msg = flow(
     [
-        ['provider_info', 'provider_config'],
-        ['authorization', 'authorization'],
-        ["accesstoken", 'token'],
-        ['userinfo', 'userinfo']
+        ["provider_info", "provider_config"],
+        ["authorization", "authorization"],
+        ["accesstoken", "token"],
+        ["userinfo", "userinfo"],
     ],
-    scope=['foobar'],
-    server_jwks=server.keyjar.export_jwks(''),
-    server_jwks_uri=server.context.provider_info['jwks_uri'],
+    scope=["foobar"],
+    server_jwks=server.keyjar.export_jwks(""),
+    server_jwks_uri=server.context.provider_info["jwks_uri"],
     request_additions={
-        'authorization': {
-            'claims': {
+        "authorization": {
+            "claims": {
                 "id_token": {"nickname": None},
                 "userinfo": {"name": None, "email": None, "email_verified": None},
             }
         }
-    }
+    },
 )

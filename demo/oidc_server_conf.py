@@ -33,9 +33,9 @@ SERVER_CONF = {
                 "base_claims": {
                     "email": {"essential": True},
                     "email_verified": {"essential": True},
-                }
+                },
             },
-        }
+        },
     },
     "authentication": {
         "anon": {
@@ -57,7 +57,7 @@ SERVER_CONF = {
                     "authorization_code": {
                         "supports_minting": ["access_token", "refresh_token", "id_token"],
                         "max_usage": 1,
-                        "expires_in": 300
+                        "expires_in": 300,
                     },
                     "access_token": {
                         "expires_in": 600,
@@ -73,11 +73,7 @@ SERVER_CONF = {
         },
     },
     "token_handler_args": {
-        "code": {
-            "kwargs": {
-                "crypt_conf": CRYPT_CONFIG
-            }
-        },
+        "code": {"kwargs": {"crypt_conf": CRYPT_CONFIG}},
         "token": {
             "class": "idpyoidc.server.token.jwt_token.JWTToken",
             "kwargs": {
@@ -93,11 +89,8 @@ SERVER_CONF = {
         },
         "id_token": {
             "class": "idpyoidc.server.token.id_token.IDToken",
-            "kwargs": {
-                "lifetime": 86400,
-                "add_claims_by_scope": True
-            },
-        }
+            "kwargs": {"lifetime": 86400, "add_claims_by_scope": True},
+        },
     },
     "session_params": SESSION_PARAMS,
 }

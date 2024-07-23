@@ -36,10 +36,7 @@ server_conf["endpoint"] = {
         "class": "idpyoidc.server.oidc.token.Token",
         "kwargs": {},
     },
-    "registration": {
-        "path": 'register',
-        "class": "idpyoidc.server.oidc.registration.Registration"
-    }
+    "registration": {"path": "register", "class": "idpyoidc.server.oidc.registration.Registration"},
 }
 
 server = Server(OPConfiguration(conf=server_conf, base_path=BASEDIR), cwd=BASEDIR)
@@ -47,12 +44,13 @@ server = Server(OPConfiguration(conf=server_conf, base_path=BASEDIR), cwd=BASEDI
 # ================ Client side ===================================
 
 client_conf = CLIENT_CONFIG.copy()
-client_conf['issuer'] = SERVER_CONF['issuer']
-client_conf['key_conf'] = {'key_defs': KEYDEFS}
-client_conf["allowed_scopes"] = ["foobar", "openid", 'offline_access']
-client_conf['services'] = {
+client_conf["issuer"] = SERVER_CONF["issuer"]
+client_conf["key_conf"] = {"key_defs": KEYDEFS}
+client_conf["allowed_scopes"] = ["foobar", "openid", "offline_access"]
+client_conf["services"] = {
     "provider_info": {
-        "class": "idpyoidc.client.oidc.provider_info_discovery.ProviderInfoDiscovery"},
+        "class": "idpyoidc.client.oidc.provider_info_discovery.ProviderInfoDiscovery"
+    },
     "register": {"class": "idpyoidc.client.oidc.registration.Registration"},
     "authorization": {"class": "idpyoidc.client.oidc.authorization.Authorization"},
     "access_token": {"class": "idpyoidc.client.oidc.access_token.AccessToken"},
@@ -67,12 +65,12 @@ server.context.set_provider_info()
 flow = Flow(client, server)
 msg = flow(
     [
-        ['provider_info', 'provider_config'],
-        ['registration', 'registration'],
-        ['authorization', 'authorization'],
-        ["accesstoken", 'token']
+        ["provider_info", "provider_config"],
+        ["registration", "registration"],
+        ["authorization", "authorization"],
+        ["accesstoken", "token"],
     ],
-    scope=['foobar'],
-    server_jwks=server.keyjar.export_jwks(''),
-    server_jwks_uri=server.context.provider_info['jwks_uri']
+    scope=["foobar"],
+    server_jwks=server.keyjar.export_jwks(""),
+    server_jwks_uri=server.context.provider_info["jwks_uri"],
 )

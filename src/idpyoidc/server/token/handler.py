@@ -10,6 +10,7 @@ from cryptojwt.utils import as_unicode
 from idpyoidc.impexp import ImpExp
 from idpyoidc.item import DLDict
 from idpyoidc.util import importer
+
 from . import DefaultToken
 from . import Token
 from . import UnknownToken
@@ -147,6 +148,7 @@ def factory(
     refresh: Optional[dict] = None,
     id_token: Optional[dict] = None,
     jwks_file: Optional[str] = "",
+    jwks_def: Optional[dict] = None,
     **kwargs
 ) -> TokenHandler:
     """
@@ -166,15 +168,15 @@ def factory(
         "idtoken": "id_token",
     }
 
-    key_defs = []
     read_only = False
     cwd = upstream_get("attribute", "cwd")
-    if kwargs.get("jwks_def"):
-        defs = kwargs["jwks_def"]
+    if jwks_def:
         if not jwks_file:
-            jwks_file = defs.get("private_path", os.path.join(cwd, JWKS_FILE))
-        read_only = defs.get("read_only", read_only)
-        key_defs = defs.get("key_defs", [])
+            jwks_file = jwks_def.get("private_path", os.path.join(cwd, JWKS_FILE))
+        read_only = jwks_def.get("read_only", read_only)
+        key_defs = jwks_def.get("key_defs", [])
+    else:
+        key_defs = None
 
     # if not jwks_file:
     #     jwks_file = os.path.join(cwd, JWKS_FILE)

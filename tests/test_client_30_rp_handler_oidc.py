@@ -4,9 +4,9 @@ from urllib.parse import parse_qs
 from urllib.parse import urlparse
 from urllib.parse import urlsplit
 
+from cryptojwt.key_jar import init_key_jar
 import pytest
 import responses
-from cryptojwt.key_jar import init_key_jar
 
 from idpyoidc.client.entity import Entity
 from idpyoidc.client.rp_handler import RPHandler
@@ -216,7 +216,6 @@ def iss_id(iss):
 
 
 class TestRPHandler(object):
-
     @pytest.fixture(autouse=True)
     def rphandler_setup(self):
         self.rph = RPHandler(
@@ -261,14 +260,21 @@ class TestRPHandler(object):
         }
 
         _pref = [k for k, v in _context.prefers().items() if v]
-        assert set(_pref) == {
-            "client_id",
-            "client_secret",
-            "redirect_uris",
-            "response_types_supported",
-            "callback_uris",
-            "scopes_supported",
-        }
+        assert set(_pref) == {'application_type',
+                              'callback_uris',
+                              'client_id',
+                              'client_secret',
+                              'default_max_age',
+                              'grant_types_supported',
+                              'id_token_signing_alg_values_supported',
+                              'redirect_uris',
+                              'request_object_signing_alg_values_supported',
+                              'response_modes_supported',
+                              'response_types_supported',
+                              'scopes_supported',
+                              'subject_types_supported',
+                              'token_endpoint_auth_signing_alg_values_supported',
+                              'userinfo_signing_alg_values_supported'}
 
         _github_id = iss_id("github")
         _keyjar = _context.upstream_get("attribute", "keyjar")
@@ -690,7 +696,6 @@ def test_get_provider_specific_service():
 
 
 class TestRPHandlerTier2(object):
-
     @pytest.fixture(autouse=True)
     def rphandler_setup(self):
         self.rph = RPHandler(BASE_URL, CLIENT_CONFIG, keyjar=CLI_KEY)
@@ -812,7 +817,6 @@ class TestRPHandlerTier2(object):
 
 
 class MockResponse:
-
     def __init__(self, status_code, text, headers=None):
         self.status_code = status_code
         self.text = text
@@ -820,7 +824,6 @@ class MockResponse:
 
 
 class MockOP(object):
-
     def __init__(self, issuer, keyjar=None):
         self.keyjar = keyjar
         self.issuer = issuer
@@ -909,7 +912,6 @@ def test_rphandler_request():
 
 
 class TestRPHandlerWithMockOP(object):
-
     @pytest.fixture(autouse=True)
     def rphandler_setup(self):
         self.issuer = "https://github.com/login/oauth/authorize"
@@ -974,8 +976,14 @@ class TestRPHandlerWithMockOP(object):
             # assume code flow
             resp = self.rph.finalize(_session["iss"], auth_response.to_dict())
 
-        assert set(resp.keys()) == {'token', 'session_state', 'userinfo', 'state', 'issuer',
-                                    'id_token'}
+        assert set(resp.keys()) == {
+            "token",
+            "session_state",
+            "userinfo",
+            "state",
+            "issuer",
+            "id_token",
+        }
 
     def test_dynamic_setup(self):
         user_id = "acct:foobar@example.com"

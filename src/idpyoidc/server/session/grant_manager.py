@@ -2,6 +2,7 @@
 Implements a database with branches with N nodes (SessionInstance instances)
 that ends in a Grant instances.
 """
+
 import logging
 from typing import Callable
 from typing import List
@@ -13,12 +14,13 @@ from idpyoidc.encrypter import get_crypt_config
 from idpyoidc.message.oauth2 import TokenExchangeRequest
 from idpyoidc.server.session.info import ClientSessionInfo
 from idpyoidc.server.token import handler
+
+from ..exception import InvalidBranchID
+from ..token.handler import TokenHandler
 from .database import Database
 from .grant import ExchangeGrant
 from .grant import Grant
 from .info import NodeInfo
-from ..exception import InvalidBranchID
-from ..token.handler import TokenHandler
 
 logger = logging.getLogger(__name__)
 
