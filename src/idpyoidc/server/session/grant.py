@@ -12,12 +12,13 @@ from idpyoidc.server.authn_event import AuthnEvent
 from idpyoidc.server.session.token import TOKEN_MAP
 from idpyoidc.server.token import Token as TokenHandler
 from idpyoidc.util import importer
+
+from ...message.oauth2 import TokenExchangeRequest
+from ...util import qualified_name
 from . import MintingNotAllowed
 from .claims import claims_match
 from .token import Item
 from .token import SessionToken
-from ...message.oauth2 import TokenExchangeRequest
-from ...util import qualified_name
 
 logger = logging.getLogger(__name__)
 
@@ -256,8 +257,10 @@ class Grant(Item):
             )
 
         if _claims_restriction and context.session_manager.node_type[0] == "user":
-            user_id, _, _ = context.session_manager.decrypt_branch_id(session_id)
-            user_info = context.claims_interface.get_user_claims(user_id, _claims_restriction)
+            user_id, client_id, _ = context.session_manager.decrypt_branch_id(session_id)
+            user_info = context.claims_interface.get_user_claims(
+                user_id, _claims_restriction, client_id=client_id
+            )
             payload.update(user_info)
 
         # Should I add the acr value
@@ -327,7 +330,11 @@ class Grant(Item):
         for param in ["audience", "aud"]:
             _val = class_args.get(param)
             if _val:
-                _aud = _aud.union(set(_val))
+                if isinstance(_val, list):
+                    _aud = _aud.union(set(_val))
+                else:
+                    _val = [_val]
+                    _aud = _aud.union(set(_val))
                 del class_args[param]
 
         if _aud != set():
@@ -391,6 +398,8 @@ class Grant(Item):
                 session_id=session_id, usage_rules=usage_rules, **token_payload
             )
 
+            if based_on:
+                based_on.used += 1
         else:
             raise ValueError("Can not mint that kind of token")
 
@@ -605,8 +614,10 @@ class ExchangeGrant(Grant):
                 secondary_identifier=secondary_identifier,
             )
 
-        user_id, _, _ = endpoint_context.session_manager.decrypt_session_id(session_id)
-        user_info = endpoint_context.claims_interface.get_user_claims(user_id, _claims_restriction)
+        user_id, client_id, _ = endpoint_context.session_manager.decrypt_session_id(session_id)
+        user_info = endpoint_context.claims_interface.get_user_claims(
+            user_id, _claims_restriction, client_id
+        )
         payload.update(user_info)
 
         # Should I add the acr value

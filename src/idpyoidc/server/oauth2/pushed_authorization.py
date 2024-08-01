@@ -1,6 +1,6 @@
+import uuid
 from typing import Optional
 from typing import Union
-import uuid
 
 from idpyoidc.message import Message
 from idpyoidc.message import oauth2
@@ -33,6 +33,7 @@ class PushedAuthorization(Authorization):
         :param request:
         """
         # create URN
+
         if isinstance(request, str):
             _request = AuthorizationRequest().from_urlencoded(request)
         else:

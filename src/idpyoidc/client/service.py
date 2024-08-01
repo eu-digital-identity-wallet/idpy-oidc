@@ -1,4 +1,5 @@
 """ The basic Service class upon which all the specific services are built. """
+
 import copy
 import json
 import logging
@@ -13,11 +14,12 @@ from cryptojwt.jws.jws import factory as jws_factory
 from cryptojwt.jwt import JWT
 
 from idpyoidc.client.exception import Unsupported
+from idpyoidc.exception import MissingSigningKey
 from idpyoidc.impexp import ImpExp
 from idpyoidc.item import DLDict
 from idpyoidc.message import Message
-from idpyoidc.message.oauth2 import ResponseMessage
 from idpyoidc.message.oauth2 import is_error_message
+from idpyoidc.message.oauth2 import ResponseMessage
 from idpyoidc.util import importer
 from .client_auth import client_auth_setup
 from .client_auth import method_to_item
@@ -261,9 +263,16 @@ class Service(ImpExp):
         _args = self.gather_request_args(**request_args)
 
         # logger.debug("kwargs: %s" % sanitize(kwargs))
+
+        # we must check if claims module is idpyoidc.client.claims.oauth2recource as
+        # in that case we don't want to set_defaults like application_type etc.
+        obj = self.upstream_get("context").claims
         # initiate the request as in an instance of the self.msg_type
         # message type
-        request = self.msg_type(**_args)
+        if obj.__class__.__module__ == "idpyoidc.client.claims.oauth2resource":
+            request = self.msg_type(**_args, set_defaults=False)
+        else:
+            request = self.msg_type(**_args)
 
         _behaviour_args = kwargs.get("behaviour_args")
         if _behaviour_args:
@@ -361,6 +370,9 @@ class Service(ImpExp):
         """
         return self.default_authn_method
 
+    def get_headers_args(self):
+        return {}
+
     def get_headers(
         self,
         request: Union[dict, Message],
@@ -440,15 +452,18 @@ class Service(ImpExp):
         if _context.issuer:
             _args["iss"] = _context.issuer
 
-        # Client authentication by usage of the Authorization HTTP header
-        # or by modifying the request object
-        _headers = self.get_headers(request, http_method=method, authn_method=authn_method, **_args)
-
         # Find out where to send this request
         try:
             endpoint_url = kwargs["endpoint"]
         except KeyError:
             endpoint_url = self.get_endpoint()
+
+        _args["endpoint_url"] = endpoint_url
+
+        # Client authentication by usage of the Authorization HTTP header
+        # or by modifying the request object
+        _args.update(self.get_headers_args())
+        _headers = self.get_headers(request, http_method=method, authn_method=authn_method, **_args)
 
         _info["url"] = get_http_url(endpoint_url, request, method=method)
 
@@ -493,7 +508,7 @@ class Service(ImpExp):
 
     def post_parse_response(self, response, **kwargs):
         """
-        This method does post processing of the service response.
+        This method does post-processing of the service response.
         Each service have their own version of this method.
 
         :param response: The service response
@@ -538,6 +553,9 @@ class Service(ImpExp):
 
     def _do_response(self, info, sformat, **kwargs):
         _context = self.upstream_get("context")
+
+        if isinstance(info, list):  # Don't have support for sformat=list
+            return info
 
         try:
             resp = self.response_cls().deserialize(info, sformat, iss=_context.issuer, **kwargs)
@@ -604,7 +622,7 @@ class Service(ImpExp):
                     if jwe_factory(info):
                         info = self._do_jwt(info)
                 except:
-                    LOGGER.debug('jwe detected')
+                    LOGGER.debug("jwe detected")
             if info and isinstance(info, str):
                 info = json.loads(info)
             sformat = "dict"
@@ -628,7 +646,9 @@ class Service(ImpExp):
         LOGGER.debug("response_cls: %s", self.response_cls.__name__)
 
         if resp is None:
-            if not info:
+            if self.response_cls == list and info == []:
+                return info
+            elif not info:
                 LOGGER.error("Missing or faulty response")
                 raise ResponseError("Missing or faulty response")
 
@@ -636,19 +656,27 @@ class Service(ImpExp):
                 resp = info
             else:
                 resp = self._do_response(info, sformat, **kwargs)
-                LOGGER.debug('Initial response parsing => "%s"', resp.to_dict())
+                if isinstance(resp, Message):
+                    LOGGER.debug(f'Initial response parsing => "{resp.to_dict()}"')
+                else:
+                    LOGGER.debug(f'Initial response parsing => "{resp}"')
 
         # is this an error message
         if sformat == "text":
             pass
         elif is_error_message(resp):
             LOGGER.debug("Error response: %s", resp)
-        else:
+        elif isinstance(resp, Message):
             vargs = self.gather_verify_arguments(response=resp, behaviour_args=behaviour_args)
             LOGGER.debug("Verify response with %s", vargs)
             try:
                 # verify the message. If something is wrong an exception is thrown
                 resp.verify(**vargs)
+            except MissingSigningKey as err:
+                LOGGER.error(f"Could not find an appropriate key: {err}")
+                if vargs["iss"] not in vargs["keyjar"].owners():
+                    LOGGER.debug(f"Issuer {vargs['iss']} not found in keyjar")
+                raise
             except Exception as err:
                 LOGGER.error("Got exception while verifying response: %s", err)
                 raise
@@ -663,7 +691,6 @@ class Service(ImpExp):
         if not resp:
             LOGGER.error("Missing or faulty response")
             raise ResponseError("Missing or faulty response")
-
 
         return resp
 

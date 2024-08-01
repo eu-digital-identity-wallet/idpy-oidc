@@ -32,9 +32,9 @@ class Authorization(authorization.Authorization):
     error_msg = oidc.ResponseMessage
 
     _supports = {
-        "request_object_signing_alg_values_supported": metadata.get_signing_algs,
-        "request_object_encryption_alg_values_supported": metadata.get_encryption_algs,
-        "request_object_encryption_enc_values_supported": metadata.get_encryption_encs,
+        "request_object_signing_alg_values_supported": metadata.get_signing_algs(),
+        "request_object_encryption_alg_values_supported": metadata.get_encryption_algs(),
+        "request_object_encryption_enc_values_supported": metadata.get_encryption_encs(),
         "response_types_supported": ["code", "id_token", "code id_token"],
         "request_parameter_supported": None,
         "request_uri_parameter_supported": None,
@@ -90,7 +90,7 @@ class Authorization(authorization.Authorization):
         _context.cstate.update(key, resp)
 
     def get_request_from_response(self, response):
-        _context = self.upstream_get("service_context")
+        _context = self.upstream_get("context")
         return _context.cstate.get_set(response["state"], message=oauth2.AuthorizationRequest)
 
     def post_parse_response(self, response, **kwargs):
@@ -213,7 +213,7 @@ class Authorization(authorization.Authorization):
         return _webname
 
     def construct_request_parameter(
-            self, req, request_param, audience=None, expires_in=0, **kwargs
+        self, req, request_param, audience=None, expires_in=0, **kwargs
     ):
         """Construct a request parameter"""
         alg = self.get_request_object_signing_alg(**kwargs)
@@ -319,8 +319,7 @@ class Authorization(authorization.Authorization):
         return req
 
     def gather_verify_arguments(
-            self, response: Optional[Union[dict, Message]] = None,
-            behaviour_args: Optional[dict] = None
+        self, response: Optional[Union[dict, Message]] = None, behaviour_args: Optional[dict] = None
     ):
         """
         Need to add some information before running verify()
@@ -377,15 +376,15 @@ class Authorization(authorization.Authorization):
         elif typ == "form_post":
             if typ in context.get_preference("response_modes_supported"):
                 return "form_post"
-        return ''
+        return ""
 
     def construct_uris(
-            self,
-            base_url: str,
-            hex: bytes,
-            context: ServiceContext,
-            targets: Optional[List[str]] = None,
-            response_types: Optional[List[str]] = None,
+        self,
+        base_url: str,
+        hex: bytes,
+        context: ServiceContext,
+        targets: Optional[List[str]] = None,
+        response_types: Optional[List[str]] = None,
     ):
         _callback_uris = context.get_preference("callback_uris", {})
 

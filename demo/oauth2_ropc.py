@@ -15,10 +15,8 @@ from idpyoidc.server.oauth2.token import Token
 SERVER_CONFIG = {
     "issuer": "https://example.net/",
     "httpc_params": {"verify": False},
-    "preference": {
-        "grant_types_supported": ["client_credentials", "password"]
-    },
-    "keys": {"uri_path": "jwks.json", "key_defs": KEYDEFS, 'read_only': False},
+    "preference": {"grant_types_supported": ["client_credentials", "password"]},
+    "keys": {"uri_path": "jwks.json", "key_defs": KEYDEFS, "read_only": False},
     "endpoint": {
         "token": {
             "path": "token",
@@ -36,8 +34,8 @@ SERVER_CONFIG = {
                 "lifetime": 3600,
                 "add_claims_by_scope": True,
                 "aud": ["https://example.org/appl"],
-            }
-        }
+            },
+        },
     },
     "client_authn": verify_client,
     "claims_interface": {
@@ -46,13 +44,7 @@ SERVER_CONFIG = {
     },
     "authz": {
         "class": AuthzHandling,
-        "kwargs": {
-            "grant_config": {
-                "usage_rules": {
-                    "access_token": {"expires_in": 3600}
-                }
-            }
-        }
+        "kwargs": {"grant_config": {"usage_rules": {"access_token": {"expires_in": 3600}}}},
     },
     "session_params": {"encrypter": SESSION_PARAMS},
     "authentication": {
@@ -62,11 +54,11 @@ SERVER_CONFIG = {
             "kwargs": {
                 "db_conf": {
                     "class": "idpyoidc.server.util.JSONDictDB",
-                    "kwargs": {"filename": full_path("passwd.json")}
+                    "kwargs": {"filename": full_path("passwd.json")},
                 }
-            }
+            },
         }
-    }
+    },
 }
 
 CLIENT_BASE_URL = "https://example.com"
@@ -75,19 +67,19 @@ CLIENT_CONFIG = {
     "client_id": "client_1",
     "client_secret": "another password",
     "base_url": CLIENT_BASE_URL,
-    'services': {
+    "services": {
         "resource_owner_password_credentials": {
             "class": "idpyoidc.client.oauth2.resource_owner_password_credentials"
-                     ".ROPCAccessTokenRequest"
+            ".ROPCAccessTokenRequest"
         }
-    }
+    },
 }
 
 # Client side
 
 client = Client(config=CLIENT_CONFIG)
 
-ropc_service = client.get_service('resource_owner_password_credentials')
+ropc_service = client.get_service("resource_owner_password_credentials")
 ropc_service.endpoint = "https://example.com/token"
 
 # Server side
@@ -104,10 +96,8 @@ server.context.cdb["client_1"] = {
 
 flow = Flow(client, server)
 msg = flow(
-    [
-        ["resource_owner_password_credentials", 'token']
-    ],
+    [["resource_owner_password_credentials", "token"]],
     request_additions={
-        'resource_owner_password_credentials': {'username': 'diana', 'password': 'krall'}
-    }
+        "resource_owner_password_credentials": {"username": "diana", "password": "krall"}
+    },
 )

@@ -1,10 +1,10 @@
 import hashlib
 import logging
 import os
+import uuid
 from typing import Callable
 from typing import List
 from typing import Optional
-import uuid
 
 from idpyoidc.encrypter import default_crypt_config
 from idpyoidc.message.oauth2 import AuthorizationRequest
@@ -18,15 +18,16 @@ from .grant import Grant
 from .grant import SessionToken
 from .info import ClientSessionInfo
 from .info import UserSessionInfo
+from ..token import handler
 from ..token import UnknownToken
 from ..token import WrongTokenClass
-from ..token import handler
 from ..token.handler import TokenHandler
 
 logger = logging.getLogger(__name__)
 
 
 class RawID(object):
+
     def __init__(self, *args, **kwargs):
         pass
 
@@ -41,6 +42,7 @@ def pairwise_id(uid, sector_identifier, salt="", **kwargs):
 
 
 class PairWiseID(object):
+
     def __init__(self, salt: Optional[str] = "", filename: Optional[str] = ""):
         if salt:
             self.salt = salt
@@ -69,6 +71,7 @@ def public_id(uid, salt="", **kwargs):
 
 
 class PublicID(PairWiseID):
+
     def __call__(self, uid, sector_identifier, *args, **kwargs):
         return public_id(uid, self.salt)
 
@@ -92,9 +95,7 @@ class SessionManager(GrantManager):
         upstream_get: Optional[Callable] = None,
     ):
         self.conf = conf or {"session_params": {"encrypter": default_crypt_config()}}
-
         session_params = self.conf.get("session_params") or {}
-
         self.token_handler = self.create_token_handler(upstream_get, token_handler_args)
 
         super(SessionManager, self).__init__(self.token_handler, self.conf)
@@ -185,7 +186,6 @@ class SessionManager(GrantManager):
         :param token_usage_rules:
         :return:
         """
-
         if auth_req:
             sector_identifier = auth_req.get("sector_identifier_uri", "")
             _claims = auth_req.get("claims", {})
@@ -198,6 +198,11 @@ class SessionManager(GrantManager):
         resources = []
         if "resource" in auth_req:
             resources = auth_req["resource"]
+        if "audience" in auth_req:
+            if isinstance(auth_req["audience"], str):
+                resources.append(auth_req["audience"])
+            else:
+                resources.extend(auth_req["audience"])
 
         return self.add_grant(
             path=self.make_path(user_id=user_id, client_id=client_id),
@@ -495,6 +500,7 @@ class SessionManager(GrantManager):
         authorization_request: Optional[bool] = False,
         handler_key: Optional[str] = "",
     ) -> dict:
+
         if handler_key:
             _token_info = self.token_handler.handler[handler_key].info(token_value)
         else:
@@ -539,5 +545,5 @@ class SessionManager(GrantManager):
         return self.unpack_branch_key(key)
 
 
-def create_session_manager(upstream_get, token_handler_args, sub_func=None, conf=None):
-    return SessionManager(sub_func=sub_func, conf=conf)
+# def create_session_manager(upstream_get, token_handler_args, sub_func=None, conf=None):
+#     return SessionManager(token_handler_args, sub_func=sub_func, conf=conf, upstream_get=upstream_get)

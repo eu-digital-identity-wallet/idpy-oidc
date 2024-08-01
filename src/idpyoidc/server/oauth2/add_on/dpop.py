@@ -4,17 +4,17 @@ from typing import Callable
 from typing import Optional
 from typing import Union
 
-from cryptojwt import as_unicode
 from cryptojwt import JWS
+from cryptojwt import as_unicode
 from cryptojwt.jwk.jwk import key_from_jwk_dict
 from cryptojwt.jws.jws import factory
 
-from idpyoidc.metadata import get_signing_algs
-from idpyoidc.message import Message
 from idpyoidc.message import SINGLE_OPTIONAL_STRING
 from idpyoidc.message import SINGLE_REQUIRED_INT
 from idpyoidc.message import SINGLE_REQUIRED_JSON
 from idpyoidc.message import SINGLE_REQUIRED_STRING
+from idpyoidc.message import Message
+from idpyoidc.metadata import get_signing_algs
 from idpyoidc.server.client_authn import BearerHeader
 
 logger = logging.getLogger(__name__)
@@ -147,7 +147,7 @@ def userinfo_post_parse_request(request, client_id, context, auth_info, **kwargs
     # The signature of the JWS is verified, now for checking the
     # content
 
-    if _dpop["htu"] != _http_info["url"].split('?')[0]:
+    if _dpop["htu"] != _http_info["url"].split("?")[0]:
         raise ValueError("htu in DPoP does not match the HTTP URI")
 
     if _dpop["htm"] != _http_info["method"]:
@@ -180,9 +180,10 @@ def token_args(context, client_id, token_args: Optional[dict] = None):
 
 
 def add_support(endpoint: dict, **kwargs):
-    #
-    _token_endp = endpoint["token"]
-    _token_endp.post_parse_request.append(token_post_parse_request)
+    # Pick one endpoint
+    _endp_name = list(endpoint.keys())[0]
+    _endp = endpoint[_endp_name]
+    _endp.post_parse_request.append(token_post_parse_request)
 
     _algs_supported = kwargs.get("dpop_signing_alg_values_supported")
     if not _algs_supported:
@@ -190,17 +191,15 @@ def add_support(endpoint: dict, **kwargs):
     else:
         _algs_supported = [alg for alg in _algs_supported if alg in get_signing_algs()]
 
-    _token_endp.upstream_get("context").provider_info[
-        "dpop_signing_alg_values_supported"
-    ] = _algs_supported
-
-    _context = _token_endp.upstream_get("context")
+    _context = _endp.upstream_get("context")
+    _context.provider_info["dpop_signing_alg_values_supported"] = _algs_supported
     _context.add_on["dpop"] = {"algs_supported": _algs_supported}
     _context.client_authn_methods["dpop"] = DPoPClientAuth
 
-    _userinfo_endpoint = endpoint.get("userinfo")
-    if _userinfo_endpoint:
-        _userinfo_endpoint.post_parse_request.append(userinfo_post_parse_request)
+    for _dpop_endpoint in kwargs.get("dpop_endpoints", ["userinfo"]):
+        _endpoint = endpoint.get(_dpop_endpoint, None)
+        if _endpoint:
+            _endpoint.post_parse_request.append(userinfo_post_parse_request)
 
 
 # DPoP-bound access token in the "Authorization" header and the DPoP proof in the "DPoP" header

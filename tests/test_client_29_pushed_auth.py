@@ -36,14 +36,9 @@ class TestPushedAuth:
             "add_ons": {
                 "pushed_authorization": {
                     "function": "idpyoidc.client.oauth2.add_on.par.add_support",
-                    "kwargs": {
-                        "body_format": "jws",
-                        "signing_algorithm": "RS256",
-                        "http_client": None,
-                        "merge_rule": "lax",
-                    },
+                    "kwargs": {}
                 }
-            },
+            }
         }
         self.entity = Client(keyjar=CLI_KEY, config=config, services=DEFAULT_OAUTH2_SERVICES)
 
@@ -57,7 +52,7 @@ class TestPushedAuth:
         with responses.RequestsMock() as rsps:
             _resp = {"request_uri": "urn:example:bwc4JK-ESC0w8acc191e-Y1LTC2", "expires_in": 3600}
             rsps.add(
-                "GET",
+                "POST",
                 auth_service.upstream_get("context").provider_info[
                     "pushed_authorization_request_endpoint"
                 ],

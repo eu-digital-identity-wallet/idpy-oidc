@@ -26,16 +26,15 @@ class AccessToken(access_token.AccessToken):
     _include = {"grant_types_supported": ["authorization_code"]}
 
     _supports = {
-        "token_endpoint_auth_methods_supported": get_client_authn_methods,
-        "token_endpoint_auth_signing_alg_values_supported": get_signing_algs,
+        "token_endpoint_auth_methods_supported": get_client_authn_methods(),
+        "token_endpoint_auth_signing_alg_values_supported": get_signing_algs(),
     }
 
     def __init__(self, upstream_get, conf: Optional[dict] = None):
         access_token.AccessToken.__init__(self, upstream_get, conf=conf)
 
     def gather_verify_arguments(
-            self, response: Optional[Union[dict, Message]] = None,
-            behaviour_args: Optional[dict] = None
+        self, response: Optional[Union[dict, Message]] = None, behaviour_args: Optional[dict] = None
     ):
         """
         Need to add some information before running verify()
@@ -43,10 +42,14 @@ class AccessToken(access_token.AccessToken):
         :return: dictionary with arguments to the verify call
         """
         _context = self.upstream_get("context")
-        _entity = self.upstream_get("entity")
+        _entity = self.upstream_get("unit")
+
+        _client_id = _entity.get_client_id()
+        if not _client_id:
+            _client_id = _context.get_client_id()
 
         kwargs = {
-            "client_id": _entity.get_client_id(),
+            "client_id": _client_id,
             "iss": _context.issuer,
             "keyjar": self.upstream_get("attribute", "keyjar"),
             "verify": True,

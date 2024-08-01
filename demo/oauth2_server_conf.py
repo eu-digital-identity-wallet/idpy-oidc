@@ -22,7 +22,7 @@ SERVER_CONF = {
             "path": "token",
             "class": "idpyoidc.server.oauth2.token.Token",
             "kwargs": {},
-        }
+        },
     },
     "authentication": {
         "anon": {
@@ -43,25 +43,20 @@ SERVER_CONF = {
                     },
                     "access_token": {
                         "expires_in": 600,
-                    }
+                    },
                 }
             }
         },
     },
     "token_handler_args": {
-        "code": {
-            "lifetime": 600,
-            "kwargs": {
-                "crypt_conf": CRYPT_CONFIG
-            }
-        },
+        "code": {"lifetime": 600, "kwargs": {"crypt_conf": CRYPT_CONFIG}},
         "token": {
             "class": "idpyoidc.server.token.jwt_token.JWTToken",
             "kwargs": {
                 "lifetime": 3600,
                 "aud": ["https://example.org/appl"],
             },
-        }
+        },
     },
     "session_params": SESSION_PARAMS,
 }
