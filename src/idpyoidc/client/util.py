@@ -1,4 +1,5 @@
 """Utilities"""
+
 import logging
 import secrets
 from http.cookiejar import Cookie
@@ -14,6 +15,7 @@ from idpyoidc.constant import URL_ENCODED
 from idpyoidc.defaults import BASECHR
 from idpyoidc.exception import UnSupported
 from idpyoidc.util import importer
+
 from .exception import TimeFormatError
 from .exception import WrongContentType
 

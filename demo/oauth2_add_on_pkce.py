@@ -22,7 +22,7 @@ server_conf = SERVER_CONF.copy()
 server_conf["keys"] = {"uri_path": "jwks.json", "key_defs": KEYDEFS}
 server_conf["token_handler_args"]["key_conf"] = {"key_defs": KEYDEFS}
 
-server_conf['add_ons'] = {
+server_conf["add_ons"] = {
     "pkce": {
         "function": "idpyoidc.server.oauth2.add_on.pkce.add_support",
         "kwargs": {},
@@ -33,16 +33,13 @@ server = Server(ASConfiguration(conf=server_conf, base_path=BASEDIR), cwd=BASEDI
 # ================ Client side ===================================
 
 client_config = CLIENT_CONFIG
-client_config['issuer'] = SERVER_CONF['issuer']
-client_config['key_conf'] = {'key_defs': KEYDEFS}
+client_config["issuer"] = SERVER_CONF["issuer"]
+client_config["key_conf"] = {"key_defs": KEYDEFS}
 
-client_config['add_ons'] = {
+client_config["add_ons"] = {
     "pkce": {
         "function": "idpyoidc.client.oauth2.add_on.pkce.add_support",
-        "kwargs": {
-            "code_challenge_length": 64,
-            "code_challenge_method": "S256"
-        },
+        "kwargs": {"code_challenge_length": 64, "code_challenge_method": "S256"},
     },
 }
 
@@ -50,7 +47,7 @@ client = Client(config=client_config)
 
 # ==== What the server needs to know about the client.
 
-server.context.cdb[CLIENT_ID] = {k: v for k, v in CLIENT_CONFIG.items() if k not in ['services']}
+server.context.cdb[CLIENT_ID] = {k: v for k, v in CLIENT_CONFIG.items() if k not in ["services"]}
 server.context.keyjar.import_jwks(client.keyjar.export_jwks(), CLIENT_ID)
 
 # Initiating the server's metadata
@@ -62,11 +59,11 @@ server.context.set_provider_info()
 flow = Flow(client, server)
 msg = flow(
     [
-        ['server_metadata', 'server_metadata'],
-        ['authorization', 'authorization'],
-        ["accesstoken", 'token']
+        ["server_metadata", "server_metadata"],
+        ["authorization", "authorization"],
+        ["accesstoken", "token"],
     ],
-    scope=['foobar'],
-    server_jwks=server.keyjar.export_jwks(''),
-    server_jwks_uri=server.context.provider_info['jwks_uri']
+    scope=["foobar"],
+    server_jwks=server.keyjar.export_jwks(""),
+    server_jwks_uri=server.context.provider_info["jwks_uri"],
 )

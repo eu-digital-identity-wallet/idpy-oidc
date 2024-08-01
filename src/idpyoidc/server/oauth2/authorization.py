@@ -13,9 +13,8 @@ from cryptojwt.jwe.exception import JWEException
 from cryptojwt.jws.exception import NoSuitableSigningKeys
 from cryptojwt.utils import as_bytes
 from cryptojwt.utils import b64e
-from idpyoidc import metadata
 
-from idpyoidc import claims
+from idpyoidc import metadata
 from idpyoidc.exception import ImproperlyConfigured
 from idpyoidc.exception import ParameterError
 from idpyoidc.exception import URIError
@@ -40,10 +39,9 @@ from idpyoidc.server.session import Revoked
 from idpyoidc.server.token.exception import UnknownToken
 from idpyoidc.server.user_authn.authn_context import pick_auth
 from idpyoidc.time_util import utc_time_sans_frac
+from idpyoidc.util import importer
 from idpyoidc.util import rndstr
 from idpyoidc.util import split_uri
-from idpyoidc.util import importer
-
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +271,11 @@ def authn_args_gather(
 
 
 def check_unknown_scopes_policy(request_info, client_id, context):
-    if not context.get_preference("deny_unknown_scopes"):
+    cinfo = context.cdb.get(client_id, {})
+    deny_unknown_scopes = cinfo.get(
+        "deny_unknown_scopes", context.get_preference("deny_unknown_scopes")
+    )
+    if not deny_unknown_scopes:
         return
 
     scope = request_info["scope"]
@@ -288,10 +290,7 @@ def check_unknown_scopes_policy(request_info, client_id, context):
 
 def validate_resource_indicators_policy(request, context, **kwargs):
     if "resource" not in request:
-        return oauth2.AuthorizationErrorResponse(
-            error="invalid_target",
-            error_description="Missing resource parameter",
-        )
+        return request
 
     resource_servers_per_client = kwargs["resource_servers_per_client"]
     client_id = request["client_id"]
@@ -353,9 +352,9 @@ class Authorization(Endpoint):
         "request_uri_parameter_supported": True,
         "response_types_supported": ["code"],
         "response_modes_supported": ["query", "fragment", "form_post"],
-        "request_object_signing_alg_values_supported": metadata.get_signing_algs,
-        "request_object_encryption_alg_values_supported": metadata.get_encryption_algs,
-        "request_object_encryption_enc_values_supported": metadata.get_encryption_encs,
+        "request_object_signing_alg_values_supported": metadata.get_signing_algs(),
+        "request_object_encryption_alg_values_supported": metadata.get_encryption_algs(),
+        "request_object_encryption_enc_values_supported": metadata.get_encryption_encs(),
         # "grant_types_supported": ["authorization_code", "implicit"],
         "code_challenge_methods_supported": ["S256"],
         "scopes_supported": [],
@@ -374,7 +373,7 @@ class Authorization(Endpoint):
     def filter_request(self, context, req):
         return req
 
-    def extra_response_args(self, aresp):
+    def extra_response_args(self, aresp, **kwargs):
         return aresp
 
     def authentication_error_response(self, request, error, error_description, **kwargs):
@@ -866,7 +865,12 @@ class Authorization(Endpoint):
                 list(set(scope + resource_scopes)), _sinfo["client_id"]
             )
 
-            rtype = set(request["response_type"][:])
+            if isinstance(request["response_type"], list):
+                rtype = set(request["response_type"][:])
+            else:  # assume it's a string
+                rtype = set()
+                rtype.add(request["response_type"])
+
             handled_response_type = []
 
             fragment_enc = True
@@ -874,6 +878,15 @@ class Authorization(Endpoint):
                 fragment_enc = False
 
             grant = _sinfo["grant"]
+
+            _aud = request.get("audience", None)
+            if _aud:
+                if isinstance(_aud, list):
+                    _aud_arg = {"aud": _aud}
+                else:
+                    _aud_arg = {"aud": [_aud]}
+            else:
+                _aud_arg = {}
 
             if "code" in rtype:
                 _code = self.mint_token(
@@ -891,6 +904,7 @@ class Authorization(Endpoint):
                     token_class="access_token",
                     grant=grant,
                     session_id=_sinfo["branch_id"],
+                    **_aud_arg,
                 )
                 aresp["access_token"] = _access_token.value
                 aresp["token_type"] = "Bearer"
@@ -909,6 +923,7 @@ class Authorization(Endpoint):
                 elif {"id_token", "token"}.issubset(rtype):
                     kwargs = {"access_token": _access_token.value}
 
+                kwargs.update(_aud_arg)
                 if rtype == {"id_token"}:
                     kwargs["as_if"] = "userinfo"
 
@@ -942,7 +957,7 @@ class Authorization(Endpoint):
                 )
                 return {"response_args": resp, "fragment_enc": fragment_enc}
 
-        aresp = self.extra_response_args(aresp)
+        aresp = self.extra_response_args(aresp, client_id=request["client_id"])
 
         return {"response_args": aresp, "fragment_enc": fragment_enc}
 
@@ -1154,6 +1169,7 @@ class Authorization(Endpoint):
 
 
 class AllowedAlgorithms:
+
     def __init__(self, algorithm_parameters):
         self.algorithm_parameters = algorithm_parameters
 

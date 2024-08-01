@@ -1,4 +1,5 @@
 """The service that talks to the OAuth2 refresh access token endpoint."""
+
 import logging
 from typing import Optional
 

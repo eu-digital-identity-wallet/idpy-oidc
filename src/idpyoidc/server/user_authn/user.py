@@ -7,6 +7,7 @@ import sys
 import warnings
 from typing import List
 from urllib.parse import unquote
+from urllib.parse import parse_qs
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptojwt.jwt import JWT
@@ -20,7 +21,6 @@ from idpyoidc.server.exception import OnlyForTestingWarning
 from idpyoidc.time_util import utc_time_sans_frac
 from idpyoidc.util import instantiate
 
-from urllib.parse import parse_qs, urlparse
 
 __author__ = "Roland Hedberg"
 
@@ -168,6 +168,7 @@ class UserPassJinja2(UserAuthnMethod):
         verify_endpoint="",
         **kwargs,
     ):
+
         super(UserPassJinja2, self).__init__(upstream_get=upstream_get)
         self.template_handler = template_handler
         self.template = template
@@ -231,6 +232,7 @@ class UserPass(UserAuthnMethod):
         upstream_get=None,
         **kwargs,
     ):
+
         super(UserPass, self).__init__(upstream_get=upstream_get)
         self.user_db = instantiate(db_conf["class"], **db_conf["kwargs"])
 
@@ -276,6 +278,7 @@ class BasicAuthn(UserAuthnMethod):
 
 
 class SymKeyAuthn(UserAuthnMethod):
+
     # user authentication using a token
 
     def __init__(self, ttl, symkey, upstream_get=None):
@@ -310,6 +313,7 @@ class SymKeyAuthn(UserAuthnMethod):
 
 
 class NoAuthn(UserAuthnMethod):
+
     # Just for testing allows anyone it without authentication
 
     def __init__(self, user, upstream_get=None):
@@ -468,21 +472,6 @@ class PidIssuerAuth(object):
 
     def unpack_token(self, token):
         return verify_signed_jwt(token=token, keyjar=self.upstream_get("context").keyjar)
-
-
-import urllib.parse
-
-
-def url_get(url_path: str, args: dict):
-    """Returns the URL for a HTTP GET query
-
-    Keyword arguments:
-    + url_path -- URL without the GET parameters
-    + args -- dictionary of parameters (key: value)
-
-    Return: URL for a HTTP GET query
-    """
-    return url_path + "?" + urllib.parse.urlencode(args)
 
 
 def factory(cls, **kwargs):

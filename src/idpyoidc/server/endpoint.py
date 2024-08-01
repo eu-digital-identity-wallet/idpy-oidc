@@ -185,7 +185,7 @@ class Endpoint(Node):
         request: Union[Message, dict, str],
         http_info: Optional[dict] = None,
         verify_args: Optional[dict] = None,
-        **kwargs
+        **kwargs,
     ):
         """
 
@@ -215,7 +215,7 @@ class Endpoint(Node):
                         "jwt",
                         keyjar=_keyjar,
                         verify=_context.httpc_params["verify"],
-                        **kwargs
+                        **kwargs,
                     )
                 elif self.request_format == "url":  # A whole URL not just the query part
                     parts = urlparse(request)
@@ -228,17 +228,19 @@ class Endpoint(Node):
 
         # Verify that the client is allowed to do this
         auth_info = self.client_authentication(req, http_info, endpoint=self, **kwargs)
+        LOGGER.debug(f"parse_request:auth_info:{auth_info}")
 
-        if "client_id" in auth_info:
-            req["client_id"] = auth_info["client_id"]
+        _client_id = auth_info.get("client_id", "")
+        if _client_id:
+            req["client_id"] = _client_id
 
             _auth_method = auth_info.get("method")
             if _auth_method and _auth_method not in ["public", "none"]:
                 req["authenticated"] = True
-
-            _client_id = auth_info["client_id"]
         else:
-            _client_id = req.get("client_id")
+            _client_id = req.get("client_id", None)
+
+        LOGGER.debug(f"parse_request:auth_info:{auth_info}")
 
         # verify that the request message is correct, may have to do it twice
         err_response = self.verify_request(
@@ -273,10 +275,11 @@ class Endpoint(Node):
         authn_info = verify_client(request=request, http_info=http_info, **kwargs)
 
         LOGGER.debug("authn_info: %s", authn_info)
-        if authn_info == {} and self.client_authn_method and len(self.client_authn_method):
-            LOGGER.debug("client_authn_method: %s", self.client_authn_method)
-            raise UnAuthorizedClient("Authorization failed")
-        if "client_id" not in authn_info and authn_info.get("method") != "none":
+        if authn_info == {}:
+            if self.client_authn_method and len(self.client_authn_method):
+                LOGGER.debug("client_authn_method: %s", self.client_authn_method)
+                raise UnAuthorizedClient("Authorization failed")
+        elif "client_id" not in authn_info and authn_info.get("method") != "none":
             raise UnAuthorizedClient("Authorization failed")
         return authn_info
 
@@ -303,7 +306,7 @@ class Endpoint(Node):
         self,
         response_args: Union[Message, dict],
         request: Optional[Union[Message, dict]] = None,
-        **kwargs
+        **kwargs,
     ) -> dict:
         _context = self.upstream_get("context")
         for meth in self.post_construct:
@@ -315,7 +318,7 @@ class Endpoint(Node):
         self,
         request: Optional[Union[Message, dict]] = None,
         http_info: Optional[dict] = None,
-        **kwargs
+        **kwargs,
     ) -> Union[Message, dict]:
         """
 
@@ -329,7 +332,7 @@ class Endpoint(Node):
         self,
         response_args: Optional[dict] = None,
         request: Optional[Union[Message, dict]] = None,
-        **kwargs
+        **kwargs,
     ):
         """
         Construct the response
@@ -350,7 +353,7 @@ class Endpoint(Node):
         self,
         response_args: Optional[dict] = None,
         request: Optional[Union[Message, dict]] = None,
-        **kwargs
+        **kwargs,
     ) -> dict:
         return self.construct(response_args, request, **kwargs)
 
@@ -359,7 +362,7 @@ class Endpoint(Node):
         response_args: Optional[dict] = None,
         request: Optional[Union[Message, dict]] = None,
         error: Optional[str] = "",
-        **kwargs
+        **kwargs,
     ) -> dict:
         """
         :param response_args: Information to use when constructing the response

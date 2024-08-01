@@ -1,4 +1,4 @@
-CLIENT_ID = 'client'
+CLIENT_ID = "client"
 
 CLIENT_CONFIG = {
     "client_secret": "SUPERhemligtlösenord",
@@ -10,5 +10,5 @@ CLIENT_CONFIG = {
         "metadata": {"class": "idpyoidc.client.oauth2.server_metadata.ServerMetadata"},
         "authorization": {"class": "idpyoidc.client.oauth2.authorization.Authorization"},
         "access_token": {"class": "idpyoidc.client.oauth2.access_token.AccessToken"},
-    }
+    },
 }

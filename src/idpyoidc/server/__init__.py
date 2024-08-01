@@ -7,6 +7,7 @@ from typing import Union
 
 from cryptojwt import KeyJar
 
+from idpyoidc.client.defaults import DEFAULT_KEY_DEFS
 from idpyoidc.node import Unit
 
 # from idpyoidc.server import authz
@@ -47,8 +48,19 @@ class Server(Unit):
         entity_id: Optional[str] = "",
         key_conf: Optional[dict] = None,
     ):
-        self.entity_id = entity_id or conf.get("entity_id")
+        self.entity_id = entity_id or conf.get("entity_id", None)
+        if not self.entity_id:
+            _conf = conf.get("conf", None)
+            if _conf:
+                self.entity_id = _conf.get("entity_id", "")
         self.issuer = conf.get("issuer", self.entity_id)
+        self.persistence = None
+
+        if upstream_get is None:
+            if key_conf is None:
+                _conf = conf.get("key_conf")
+                if _conf is None:
+                    key_conf = {"key_defs": DEFAULT_KEY_DEFS}
 
         Unit.__init__(
             self,
@@ -61,7 +73,6 @@ class Server(Unit):
             issuer_id=self.issuer,
         )
 
-        self.upstream_get = upstream_get
         if isinstance(conf, OPConfiguration) or isinstance(conf, ASConfiguration):
             self.conf = conf
         else:
@@ -75,6 +86,7 @@ class Server(Unit):
             cwd=cwd,
             cookie_handler=cookie_handler,
             keyjar=self.keyjar,
+            entity_id=self.entity_id,
         )
 
         # Need to have context in place before doing this

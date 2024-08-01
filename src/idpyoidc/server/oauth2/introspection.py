@@ -1,12 +1,13 @@
 """Implements RFC7662"""
+
 import logging
 from typing import Optional
 
 from idpyoidc.message import oauth2
 from idpyoidc.server.endpoint import Endpoint
+from idpyoidc.server.exception import ToOld
 from idpyoidc.server.token.exception import UnknownToken
 from idpyoidc.server.token.exception import WrongTokenClass
-from idpyoidc.server.exception import ToOld
 
 LOGGER = logging.getLogger(__name__)
 
@@ -147,7 +148,7 @@ class Introspection(Endpoint):
         )
         if _claims_restriction:
             user_info = _context.claims_interface.get_user_claims(
-                _session_info["user_id"], _claims_restriction
+                _session_info["user_id"], _claims_restriction, client_id=_session_info["client_id"]
             )
             if user_info:
                 _resp.update(user_info)

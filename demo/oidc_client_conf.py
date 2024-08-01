@@ -1,4 +1,4 @@
-CLIENT_ID = 'client'
+CLIENT_ID = "client"
 
 CLIENT_CONFIG = {
     "client_secret": "SUPERhemligtlösenord",
@@ -9,9 +9,10 @@ CLIENT_CONFIG = {
     "allowed_scopes": ["foobar", "openid"],
     "services": {
         "provider_info": {
-            "class": "idpyoidc.client.oidc.provider_info_discovery.ProviderInfoDiscovery"},
+            "class": "idpyoidc.client.oidc.provider_info_discovery.ProviderInfoDiscovery"
+        },
         "authorization": {"class": "idpyoidc.client.oidc.authorization.Authorization"},
         "access_token": {"class": "idpyoidc.client.oidc.access_token.AccessToken"},
-        'userinfo': {'class': "idpyoidc.client.oidc.userinfo.UserInfo"}
-    }
+        "userinfo": {"class": "idpyoidc.client.oidc.userinfo.UserInfo"},
+    },
 }

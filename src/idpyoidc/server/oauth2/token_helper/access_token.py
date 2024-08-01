@@ -9,11 +9,12 @@ from idpyoidc.exception import ImproperlyConfigured
 from idpyoidc.message import Message
 from idpyoidc.message.oauth2 import TokenErrorResponse
 from idpyoidc.util import sanitize
-from . import TokenEndpointHelper
-from . import validate_resource_indicators_policy
+
 from ...session import MintingNotAllowed
 from ...session.token import AuthorizationCode
 from ...token import UnknownToken
+from . import TokenEndpointHelper
+from . import validate_resource_indicators_policy
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,11 @@ class AccessTokenHelper(TokenEndpointHelper):
             if resources:
                 token_args = {"resources": resources}
             else:
-                token_args = None
+                token_args = {}
+
+            _aud = grant.authorization_request.get("audience")
+            if _aud:
+                token_args["aud"] = _aud
 
             try:
                 token = self._mint_token(
@@ -134,6 +139,8 @@ class AccessTokenHelper(TokenEndpointHelper):
                     _response["expires_in"] = token.expires_at - utc_time_sans_frac()
 
         if issue_refresh and "refresh_token" in _supports_minting:
+            if token:
+                _based_on.used -= 1
             try:
                 refresh_token = self._mint_token(
                     token_class="refresh_token",

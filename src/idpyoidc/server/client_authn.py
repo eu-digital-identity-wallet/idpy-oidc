@@ -123,7 +123,7 @@ class NoneAuthn(ClientAuthnMethod):
         endpoint=None,  # Optional[Endpoint]
         **kwargs,
     ):
-        return {"client_id": request.get("client_id"), "token": authorization_token}
+        return {"client_id": request.get("client_id")}
 
 
 class PublicAuthn(ClientAuthnMethod):
@@ -225,6 +225,7 @@ class BearerHeader(ClientSecretBasic):
         get_client_id_from_token: Optional[Callable] = None,
         **kwargs,
     ):
+        logger.debug(f"Client Auth method: {self.tag}")
         token = authorization_token.split(" ", 1)[1]
         _context = self.upstream_get("context")
         client_id = ""
@@ -235,7 +236,10 @@ class BearerHeader(ClientSecretBasic):
                 raise BearerTokenAuthenticationError("Expired token")
             except KeyError:
                 raise BearerTokenAuthenticationError("Unknown token")
-        return {"token": token, "client_id": client_id}
+            except Exception as err:
+                logger.debug(f"Exception in {self.tag}")
+
+        return {"token": token, "client_id": client_id, "method": self.tag}
 
 
 class BearerBody(ClientSecretPost):
@@ -271,6 +275,7 @@ class BearerBody(ClientSecretPost):
 
 
 class JWSAuthnMethod(ClientAuthnMethod):
+
     def is_usable(self, request=None, authorization_token=None):
         if request is None:
             return False
@@ -476,7 +481,7 @@ def verify_client(
     auth_info = {}
 
     _context = endpoint.upstream_get("context")
-    methods = _context.client_authn_methods
+    methods = getattr(_context, "client_authn_methods", None)
 
     client_id = None
     allowed_methods = getattr(endpoint, "client_authn_method")
@@ -484,11 +489,14 @@ def verify_client(
         allowed_methods = list(methods.keys())  # If not specific for this endpoint then all
 
     _method = None
+    _cdb = _cinfo = None
+    _tested = []
     for _method in (methods[meth] for meth in allowed_methods):
         if not _method.is_usable(request=request, authorization_token=authorization_token):
             continue
         try:
             logger.info(f"Verifying client authentication using {_method.tag}")
+            _tested.append(_method.tag)
             auth_info = _method.verify(
                 keyjar=endpoint.upstream_get("attribute", "keyjar"),
                 request=request,
@@ -502,6 +510,8 @@ def verify_client(
             logger.info("Verifying auth using {} failed: {}".format(_method.tag, err))
             continue
 
+        logger.debug(f"Verify returned: {auth_info}")
+
         if auth_info.get("method") == "none" and auth_info.get("client_id") is None:
             break
 
@@ -513,14 +523,20 @@ def verify_client(
             client_id = also_known_as[client_id]
             auth_info["client_id"] = client_id
 
-        _get_client_info = kwargs.get("get_client_info")
+        _get_client_info = kwargs.get("get_client_info", None)
         if _get_client_info:
-            _cinfo = _get_client_info(client_id, _context)
+            _cinfo = _get_client_info(client_id, endpoint)
         else:
+            _cdb = getattr(_context, "cdb", None)
             try:
-                _cinfo = _context.cdb[client_id]
+                _cinfo = _cdb[client_id]
             except KeyError:
-                raise UnknownClient("Unknown Client ID")
+                _auto_reg = getattr(endpoint, "automatic_registration", None)
+                if _auto_reg:
+                    _cinfo = {"client_id": client_id}
+                    _auto_reg.set(client_id, _cinfo)
+                else:
+                    raise UnknownClient("Unknown Client ID")
 
         if not _cinfo:
             raise UnknownClient("Unknown Client ID")
@@ -531,7 +547,7 @@ def verify_client(
 
         # Validate that the used method is allowed for this client/endpoint
         client_allowed_methods = _cinfo.get(
-            f"{endpoint.endpoint_name}_client_authn_method", _cinfo.get("client_authn_method")
+            f"{endpoint.endpoint_name}_client_authn_method", _cinfo.get("client_authn_method", None)
         )
         if client_allowed_methods is not None and auth_info["method"] not in client_allowed_methods:
             logger.info(
@@ -542,14 +558,17 @@ def verify_client(
             continue
         break
 
+    logger.debug(f"Authn methods applied")
+    logger.debug(f"Method tested: {_tested}")
+
     # store what authn method was used
-    if "method" in auth_info and client_id:
+    if "method" in auth_info and client_id and _cdb:
         _request_type = request.__class__.__name__
         _used_authn_method = _cinfo.get("auth_method")
         if _used_authn_method:
-            _context.cdb[client_id]["auth_method"][_request_type] = auth_info["method"]
+            _cdb[client_id]["auth_method"][_request_type] = auth_info["method"]
         else:
-            _context.cdb[client_id]["auth_method"] = {_request_type: auth_info["method"]}
+            _cdb[client_id]["auth_method"] = {_request_type: auth_info["method"]}
 
     return auth_info
 
