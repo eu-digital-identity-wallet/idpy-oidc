@@ -68,7 +68,7 @@ class RefreshTokenHelper(TokenEndpointHelper):
             _resp["expires_in"] = access_token.expires_at - utc_time_sans_frac()
 
         _mints = token.usage_rules.get("supports_minting")
-        issue_refresh = kwargs.get("issue_refresh", False)
+        issue_refresh = True  # kwargs.get("issue_refresh", None)
         if "refresh_token" in _mints and issue_refresh:
             refresh_token = self._mint_token(
                 token_class="refresh_token",

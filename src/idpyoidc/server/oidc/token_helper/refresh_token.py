@@ -73,7 +73,7 @@ class RefreshTokenHelper(TokenEndpointHelper):
 
         _mints = token.usage_rules.get("supports_minting")
 
-        issue_refresh = kwargs.get("issue_refresh", None)
+        issue_refresh = True  # kwargs.get("issue_refresh", None)
         # The existence of offline_access scope overwrites issue_refresh
         if issue_refresh is None and "offline_access" in scope:
             issue_refresh = True
