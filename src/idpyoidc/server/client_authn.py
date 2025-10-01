@@ -1,4 +1,5 @@
 import base64
+import json
 import logging
 from typing import Callable
 from typing import Dict
@@ -12,9 +13,12 @@ from cryptojwt.jwt import JWT
 from cryptojwt.jwt import utc_time_sans_frac
 from cryptojwt.utils import as_bytes
 from cryptojwt.utils import as_unicode
+from cryptojwt.jws.jws import factory
+
 
 from idpyoidc.message import Message
 from idpyoidc.message.oidc import JsonWebToken
+from idpyoidc.message.oauth2.device_authorization import WalletInstanceAttestationJWT
 from idpyoidc.message.oidc import verified_claim_name
 from idpyoidc.server.constant import JWT_BEARER
 from idpyoidc.server.exception import BearerTokenAuthenticationError
@@ -25,6 +29,10 @@ from idpyoidc.server.exception import ToOld
 from idpyoidc.server.exception import UnknownClient
 from idpyoidc.util import importer
 from idpyoidc.util import sanitize
+from idpyoidc.node import topmost_unit
+from idpyoidc.key_import import import_jwks
+from cryptojwt.exception import IssuerNotFound
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +53,7 @@ class ClientAuthnMethod(object):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         """
@@ -81,6 +90,7 @@ class ClientAuthnMethod(object):
         self,
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
+        http_info: Optional[dict] = None,
     ):
         """
         Verify that this authentication method is applicable.
@@ -113,7 +123,7 @@ class NoneAuthn(ClientAuthnMethod):
 
     tag = "none"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         return request is not None
 
     def _verify(
@@ -121,6 +131,7 @@ class NoneAuthn(ClientAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         return {"client_id": request.get("client_id")}
@@ -134,7 +145,14 @@ class PublicAuthn(ClientAuthnMethod):
 
     tag = "public"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
+        if http_info is not None:
+            _headers = http_info.get("headers", {})
+            if {"oauth-client-attestation", "oauth-client-attestation-pop"} <= {
+                k.lower() for k in _headers
+            }:
+                return False
+
         return request and "client_id" in request
 
     def _verify(
@@ -142,6 +160,7 @@ class PublicAuthn(ClientAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         return {"client_id": request["client_id"]}
@@ -156,7 +175,7 @@ class ClientSecretBasic(ClientAuthnMethod):
 
     tag = "client_secret_basic"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if authorization_token is not None and authorization_token.startswith("Basic "):
             return True
         return False
@@ -166,6 +185,7 @@ class ClientSecretBasic(ClientAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         client_info = basic_authn(authorization_token)
@@ -186,7 +206,7 @@ class ClientSecretPost(ClientSecretBasic):
 
     tag = "client_secret_post"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if request is None:
             return False
         if "client_id" in request and "client_secret" in request:
@@ -198,6 +218,7 @@ class ClientSecretPost(ClientSecretBasic):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         _context = self.upstream_get("context")
@@ -212,7 +233,7 @@ class BearerHeader(ClientSecretBasic):
 
     tag = "bearer_header"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if authorization_token is not None and authorization_token.startswith("Bearer "):
             return True
         return False
@@ -222,6 +243,7 @@ class BearerHeader(ClientSecretBasic):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         get_client_id_from_token: Optional[Callable] = None,
         **kwargs,
     ):
@@ -249,7 +271,7 @@ class BearerBody(ClientSecretPost):
 
     tag = "bearer_body"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if request is not None and "access_token" in request:
             return True
         return False
@@ -259,6 +281,7 @@ class BearerBody(ClientSecretPost):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         get_client_id_from_token: Optional[Callable] = None,
         **kwargs,
     ):
@@ -276,7 +299,7 @@ class BearerBody(ClientSecretPost):
 
 class JWSAuthnMethod(ClientAuthnMethod):
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if request is None:
             return False
         if "client_assertion" in request:
@@ -288,6 +311,7 @@ class JWSAuthnMethod(ClientAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         key_type: Optional[str] = None,
         **kwargs,
     ):
@@ -356,6 +380,7 @@ class ClientSecretJWT(JWSAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         res = super()._verify(
@@ -377,6 +402,7 @@ class PrivateKeyJWT(JWSAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         res = super()._verify(
@@ -390,10 +416,121 @@ class PrivateKeyJWT(JWSAuthnMethod):
         return res
 
 
+from cryptojwt.jwk.ec import ECKey
+
+
+# AttestationJWTClientAuthentication
+class ClientAuthenticationAttestation(ClientAuthnMethod):
+    # based on https://www.ietf.org/archive/id/draft-ietf-oauth-attestation-based-client-auth-01.html
+    tag = "attest_jwt_client_auth"
+    assertion_type = "urn:ietf:params:oauth:client-assertion-type:jwt-client-attestation"
+    attestation_class = {"wallet-attestation+jwt": WalletInstanceAttestationJWT}
+    metadata = {}
+
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
+        if request is None and http_info is None:
+            return False
+
+        _headers = http_info.get("headers", {})
+        if {"oauth-client-attestation", "oauth-client-attestation-pop"} <= {
+            k.lower() for k in _headers
+        }:
+            return True
+
+        return False
+
+    def _verify(
+        self,
+        request: Optional[Union[dict, Message]] = None,
+        authorization_token: Optional[str] = None,
+        endpoint=None,  # Optional[Endpoint]
+        get_client_id_from_token: Optional[Callable] = None,
+        http_info: Optional[dict] = None,
+        **kwargs,
+    ):
+
+        headers = {k.lower(): v for k, v in http_info["headers"].items()}
+
+        wia = headers["oauth-client-attestation"]
+        pop = headers["oauth-client-attestation-pop"]
+
+        logger.info(f"OAuth-Client-Attestation: {wia}")
+        logger.info(f"OAuth-Client-Attestation-PoP: {pop}")
+
+        oas = topmost_unit(self)
+
+        logger.info(f"oas: {oas.context.keyjar}")
+
+        _keyjar = oas.context.keyjar
+
+        """ _wia = verify_wallet_instance_attestation(wia,
+                                                  _keyjar,
+                                                  self,
+                                                  self.attestation_class) """
+
+        jws = factory(wia)
+
+        _wia = jws.jwt.payload()
+
+        # Get the header
+        print("Header:")
+        print(json.dumps(jws.jwt.headers, indent=2))
+
+        # Get the payload (decoded but not verified)
+        print("\nPayload:")
+        print(json.dumps(jws.jwt.payload(), indent=2))
+
+        logger.info(f"Verified WIA: ", _wia)
+        # Should be a key in there
+
+        _jwk = _wia["cnf"]["jwk"]
+
+        print("\n1")
+        # _keyjar = import_jwks(_keyjar, {"keys": [_jwk]}, _wia["sub"])
+
+        """ if "kid" in _wia["cnf"]["jwk"]:
+            if _wia["cnf"]["jwk"]["kid"] != _wia["sub"]:
+                _keyjar = import_jwks(_keyjar, {"keys": [_jwk]}, _wia["cnf"]["jwk"]["kid"]) """
+
+        # have already saved the key that comes in the wia
+        # _verifier = JWT(_keyjar)
+
+        print("\n3")
+        logger.debug("Verifying the PoP")
+        try:
+            # _pop = _verifier.unpack(pop)
+
+            key = ECKey(**_jwk)
+            pop_jws = factory(pop)
+            pop_jws.verify_compact(pop, keys=[key])
+            print("\n4")
+        except (Invalid, MissingKey, BadSignature, IssuerNotFound) as err:
+            logger.exception("unpacking PoP")
+            raise ClientAuthenticationError(f"{err.__class__.__name__} {err}")
+        except Exception as err:
+            logger.exception("unpacking PoP")
+            raise err
+
+        """ if isinstance(_pop, Message):
+            _pop.verify() """
+
+        # Dynamically add/register client
+        _c_info = {"client_id": _wia["sub"]}
+        # Add metadata from the WIE/WIA
+        for key, val in self.metadata.items():
+            _val = _wia.get(key, None)
+            if _val:
+                _c_info[key] = _val
+
+        oas.context.cdb[_wia["sub"]] = _c_info
+
+        return {"client_id": _wia["sub"], "jwt": _wia}
+
+
 class RequestParam(ClientAuthnMethod):
     tag = "request_param"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if request and "request" in request:
             return True
 
@@ -402,6 +539,7 @@ class RequestParam(ClientAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         _context = self.upstream_get("context")
@@ -435,6 +573,7 @@ CLIENT_AUTHN_METHOD = dict(
     client_secret_jwt=ClientSecretJWT,
     private_key_jwt=PrivateKeyJWT,
     request_param=RequestParam,
+    wallet_attestation=ClientAuthenticationAttestation,
     public=PublicAuthn,
     none=NoneAuthn,
 )
@@ -471,6 +610,8 @@ def verify_client(
         possibly access token.
     """
 
+    print("\n-------------at client_auth verify_client------------------------")
+
     if http_info and "headers" in http_info:
         authorization_token = http_info["headers"].get("authorization")
         if not authorization_token:
@@ -488,21 +629,30 @@ def verify_client(
     if not allowed_methods:
         allowed_methods = list(methods.keys())  # If not specific for this endpoint then all
 
+    print("\n-------------allowed_methods: ", allowed_methods)
+    print("\n-------------http_info: ", http_info)
+
     _method = None
     _cdb = _cinfo = None
     _tested = []
     for _method in (methods[meth] for meth in allowed_methods):
-        if not _method.is_usable(request=request, authorization_token=authorization_token):
+        print("\n-------------_method: ", _method)
+        if not _method.is_usable(
+            request=request, authorization_token=authorization_token, http_info=http_info
+        ):
+            print("\n-------------not usable: ", _method)
             continue
         try:
             logger.info(f"Verifying client authentication using {_method.tag}")
             _tested.append(_method.tag)
+
             auth_info = _method.verify(
                 keyjar=endpoint.upstream_get("attribute", "keyjar"),
                 request=request,
                 authorization_token=authorization_token,
                 endpoint=endpoint,
                 get_client_id_from_token=get_client_id_from_token,
+                http_info=http_info,
             )
         except (BearerTokenAuthenticationError, ClientAuthenticationError):
             raise

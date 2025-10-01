@@ -524,7 +524,7 @@ class Registration(Endpoint):
 
         return self.error_cls(error=_error, error_description=f"{exception}")
 
-    def process_request_authorization(self, client_id, client_secret, redirect_uri):
+    def process_request_authorization(self, client_id, redirect_uri):
         logger.info("Starting Registration process request authorization")
 
         args = {
@@ -548,10 +548,8 @@ class Registration(Endpoint):
             raise ValueError("Missing client_id")
 
         _cinfo = {"client_id": client_id, "client_salt": rndstr(8)}
-        _cinfo["client_secret"] = client_secret
-        _eat = self.client_secret_expiration_time()
-        if _eat:
-            _cinfo["client_secret_expires_at"] = _eat
+
+        client_secret = self.add_client_secret(_cinfo, client_id, _context)
 
         _context.cdb[client_id] = _cinfo
         _cinfo = self.do_client_registration(
