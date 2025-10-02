@@ -515,16 +515,25 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
             _pop.verify() """
 
         # Dynamically add/register client
-        _c_info = {"client_id": _wia["sub"]}
+        # _c_info = {"client_id": _wia["sub"]}
+
+        _c_info = {
+            "client_id": request["client_id"],
+            "redirect_uris": [(request["redirect_uri"], {})],
+        }
+
         # Add metadata from the WIE/WIA
         for key, val in self.metadata.items():
             _val = _wia.get(key, None)
             if _val:
                 _c_info[key] = _val
 
-        oas.context.cdb[_wia["sub"]] = _c_info
+        # oas.context.cdb[_wia["sub"]] = _c_info
 
-        return {"client_id": _wia["sub"], "jwt": _wia}
+        oas.context.cdb[request["client_id"]] = _c_info
+
+        # return {"client_id": _wia["sub"], "jwt": _wia}
+        return {"client_id": request["client_id"], "jwt": _wia}
 
 
 class RequestParam(ClientAuthnMethod):
