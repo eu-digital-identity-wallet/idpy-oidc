@@ -1,6 +1,8 @@
 import base64
 import json
 import logging
+import time
+from datetime import datetime
 from typing import Callable
 from typing import Dict
 from typing import Optional
@@ -146,6 +148,7 @@ class PublicAuthn(ClientAuthnMethod):
     tag = "public"
 
     def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
+
         if http_info is not None:
             _headers = http_info.get("headers", {})
             if {"oauth-client-attestation", "oauth-client-attestation-pop"} <= {
@@ -439,6 +442,193 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
 
         return False
 
+    def verify_pop(
+        self,
+        _wia,
+        _pop_raw,
+        POP_TIME_WINDOW,
+        CLOCK_SKEW,
+        ALLOWED_ASYM_ALGS,
+    ):
+        _now = time.time()
+
+        jws = factory(_pop_raw)
+        _pop_headers = jws.jwt.headers
+        _pop = jws.jwt.payload()
+
+        # 1. Check 'typ' in header
+        if _pop_headers.get("typ") != "oauth-client-attestation-pop+jwt":
+            logger.error("WIA 'typ' header is missing or incorrect.")
+            raise ClientAuthenticationError(
+                "Invalid Client Attestation format: missing or incorrect 'typ'."
+            )
+
+        # 2. Check 'alg' in header (REQUIRED)
+        _alg = _pop_headers.get("alg")
+        if not _alg:
+            logger.error("PoP header is missing the 'alg' parameter.")
+            raise ClientAuthenticationError("PoP must contain a signature algorithm ('alg').")
+
+        if _alg not in ALLOWED_ASYM_ALGS:
+            logger.error(f"PoP signature algorithm '{_alg}' is not in the allowed list.")
+            raise ClientAuthenticationError("PoP uses a disallowed signature algorithm.")
+
+        _jwk = _wia["cnf"]["jwk"]
+
+        # Verify the PoP JWS signature using the public key
+        try:
+            key = ECKey(**_jwk)
+            pop_jws = factory(_pop_raw)
+            pop_jws.verify_compact(_pop_raw, keys=[key])  # verify signature with public key
+            logger.info("✅ PoP signature verified using WIA public key.")
+        except (Invalid, MissingKey, BadSignature, IssuerNotFound) as err:
+            logger.exception("Failed PoP signature verification.")
+            raise ClientAuthenticationError(
+                f"PoP signature verification failed: {err.__class__.__name__}"
+            )
+        except Exception as err:
+            logger.exception("Unexpected error verifying PoP.")
+            raise ClientAuthenticationError(f"Unexpected error verifying PoP: {err}")
+
+        # 3. REQUIRED Claims
+        required_claims = ["iss", "aud", "jti", "iat"]
+        for claim in required_claims:
+            if claim not in _pop:
+                logger.error(f"PoP missing required claim: {claim}")
+                raise ClientAuthenticationError(
+                    f"Client Attestation PoP missing required claim: {claim}."
+                )
+
+        _iss = _pop.get("iss")
+        _aud = _pop.get("aud")
+        _jti = _pop.get("jti")
+        _iat = _pop.get("iat")
+        _nbf = _pop.get("nbf")
+
+        wia_sub = _wia.get("sub")
+        if _iss != wia_sub:
+            logger.error(f"PoP 'iss' ({_iss}) does not match WIA 'sub' ({wia_sub}).")
+            raise ClientAuthenticationError(
+                "PoP issuer ('iss') must match WIA subject ('sub') / client_id."
+            )
+
+        # 6. Check 'iat' freshness
+        # Must be within ± POP_TIME_WINDOW of current time
+        if abs(_now - _iat) > POP_TIME_WINDOW:
+            logger.error(
+                f"PoP 'iat' ({datetime.fromtimestamp(_iat)}) not within allowed window ({POP_TIME_WINDOW}s)."
+            )
+            raise ClientAuthenticationError("PoP 'iat' outside allowed freshness window.")
+
+        # 7. Check 'nbf' (if present)
+        if _nbf and (_now + CLOCK_SKEW) <= _nbf:
+            logger.error(f"PoP not yet valid (nbf: {datetime.fromtimestamp(_nbf)})")
+            raise ClientAuthenticationError("PoP is not yet valid (nbf in the future).")
+
+        logger.info("Verified Client Attestation PoP successfully.", extra={"jti": _jti})
+
+    def verify_oath_attestation(
+        self,
+        _wia_headers,
+        _wia,
+        request,
+        ATTESTATION_MAX_AGE,
+        CLOCK_SKEW,
+        ALLOWED_ASYM_ALGS,
+    ):
+        _now = time.time()
+
+        # 1. Check 'typ' in header
+        if _wia_headers.get("typ") != "oauth-client-attestation+jwt":
+            logger.error("WIA 'typ' header is missing or incorrect.")
+            raise ClientAuthenticationError(
+                "Invalid Client Attestation format: missing or incorrect 'typ'."
+            )
+
+        # 2. Check REQUIRED Claims: 'iss', 'sub', 'exp', 'cnf'
+        required_claims = ["iss", "sub", "exp", "cnf"]
+        for claim in required_claims:
+            if claim not in _wia:
+                logger.error(f"WIA missing required claim: {claim}")
+                raise ClientAuthenticationError(
+                    f"Client Attestation missing required claim: {claim}."
+                )
+
+        # 2. Check 'alg' in header (REQUIRED)
+        _alg = _wia_headers.get("alg")
+        if not _alg:
+            logger.error("WIA header is missing the 'alg' parameter.")
+            raise ClientAuthenticationError("WIA must contain a signature algorithm ('alg').")
+
+        if _alg not in ALLOWED_ASYM_ALGS:
+            logger.error(f"WIA signature algorithm '{_alg}' is not in the allowed list.")
+            raise ClientAuthenticationError("WIA uses a disallowed signature algorithm.")
+
+        try:
+            _jwk = _wia["cnf"]["jwk"]
+        except KeyError:
+            logger.error("WIA missing 'cnf.jwk' for PoP signature verification.")
+            raise ClientAuthenticationError("Missing public key in WIA 'cnf' claim.")
+
+        request_client_id = request.get("client_id")
+        wia_sub = _wia.get("sub")
+
+        if not request_client_id:
+            logger.error("Request body is missing the 'client_id' parameter.")
+            # Reject if the request context doesn't have the client_id to compare against
+            raise ClientAuthenticationError("Missing 'client_id' in request.")
+
+        if wia_sub != request_client_id:
+            logger.error(
+                f"WIA 'sub' ({wia_sub}) does not match request 'client_id' ({request_client_id})."
+            )
+            raise ClientAuthenticationError(
+                "Client Attestation subject ('sub') must match the request 'client_id'."
+            )
+
+        # 3. Check 'cnf' structure and 'jwk' existence
+        _jwk = _wia["cnf"].get("jwk")
+        if not _jwk or not isinstance(_jwk, dict):
+            logger.error("WIA 'cnf' claim missing required 'jwk'.")
+            raise ClientAuthenticationError("Client Attestation 'cnf' claim is malformed.")
+
+        # 3a. Ensure the JWK is NOT a private key
+        private_fields = {"d", "p", "q", "dp", "dq", "qi"}
+        found_private_fields = private_fields.intersection(_jwk.keys())
+        if found_private_fields:
+            logger.error(f"WIA 'jwk' contains private key parameters: {found_private_fields}")
+            raise ClientAuthenticationError(
+                "Client Attestation 'jwk' must not contain private key material."
+            )
+
+        # 4. Check 'exp' (Expiration Time) with clock skew
+        # The current time minus the skew must be BEFORE the expiration time.
+        if (_now - CLOCK_SKEW) >= _wia["exp"]:
+            logger.error(
+                f"WIA expired at {datetime.fromtimestamp(_wia['exp'])}, current time is too far past."
+            )
+            raise ClientAuthenticationError(
+                "Client Attestation has expired (expired time is before current time minus skew)."
+            )
+
+        # 5. Check 'nbf' (Not Before) - OPTIONAL but must be respected if present
+        _nbf = _wia.get("nbf")
+        if _nbf and (_now + CLOCK_SKEW) <= _nbf:
+            logger.error(f"WIA not yet valid (nbf: {datetime.fromtimestamp(_nbf)})")
+            raise ClientAuthenticationError("Client Attestation is not yet valid.")
+
+        # 6. Check 'iat' (Issued At) - OPTIONAL but used for ATTESTATION_MAX_AGE freshness
+        _iat = _wia.get("iat")
+        if _iat:
+            # Check freshness: iat must be within ATTESTATION_MAX_AGE seconds
+            if (_now - _iat) > ATTESTATION_MAX_AGE:
+                logger.error(f"WIA is too old (iat: {datetime.fromtimestamp(_iat)})")
+                raise ClientAuthenticationError("Client Attestation is too old (max age exceeded).")
+
+        # --- End WIA Claim Validity Checks ---
+
+        logger.info(f"Verified WIA: ", _wia)
+
     def _verify(
         self,
         request: Optional[Union[dict, Message]] = None,
@@ -449,28 +639,80 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
         **kwargs,
     ):
 
+        ATTESTATION_MAX_AGE = 3600  # seconds: how fresh attestation must be
+        POP_TIME_WINDOW = 300  # seconds: PoP iat must be within +/- this window
+        CLOCK_SKEW = 30
+        # Allowed asymmetric signature algorithms (registered asymmetric JOSE algs)
+        ALLOWED_ASYM_ALGS = {
+            "ES256",
+            "ES384",
+            "ES512",
+            "RS256",
+            "RS384",
+            "RS512",
+            "PS256",
+            "PS384",
+            "PS512",
+        }
+
+        if not http_info or "headers" not in http_info:
+            logger.error("Missing http_info or headers")
+            raise ClientAuthenticationError("Missing http_info or headers")
+
         headers = {k.lower(): v for k, v in http_info["headers"].items()}
 
-        wia = headers["oauth-client-attestation"]
-        pop = headers["oauth-client-attestation-pop"]
+        if "oauth-client-attestation" not in headers:
+            logger.error("Missing OAuth-Client-Attestation header")
+            raise ClientAuthenticationError("Missing OAuth-Client-Attestation header")
 
-        logger.info(f"OAuth-Client-Attestation: {wia}")
-        logger.info(f"OAuth-Client-Attestation-PoP: {pop}")
+        if "oauth-client-attestation-pop" not in headers:
+            logger.error("Missing OAuth-Client-Attestation-PoP header")
+            raise ClientAuthenticationError("Missing OAuth-Client-Attestation-PoP header")
+
+        wia_raw = headers["oauth-client-attestation"]
+        pop_raw = headers["oauth-client-attestation-pop"]
+
+        if "," in wia_raw:
+            logger.error("OAuth-Client-Attestation header contains multiple values")
+            raise ClientAuthenticationError(
+                "OAuth-Client-Attestation header contains multiple values"
+            )
+
+        if "," in pop_raw:
+            logger.error("OAuth-Client-Attestation-PoP header contains multiple values")
+            raise ClientAuthenticationError(
+                "OAuth-Client-Attestation-PoP header contains multiple values"
+            )
+
+        logger.info(f"OAuth-Client-Attestation: {wia_raw}")
+        logger.info(f"OAuth-Client-Attestation-PoP: {pop_raw}")
 
         oas = topmost_unit(self)
 
         logger.info(f"oas: {oas.context.keyjar}")
 
-        _keyjar = oas.context.keyjar
+        jws = factory(wia_raw)
 
-        """ _wia = verify_wallet_instance_attestation(wia,
-                                                  _keyjar,
-                                                  self,
-                                                  self.attestation_class) """
-
-        jws = factory(wia)
-
+        jws = factory(wia_raw)
+        _wia_headers = jws.jwt.headers
         _wia = jws.jwt.payload()
+
+        self.verify_oath_attestation(
+            _wia_headers=_wia_headers,
+            _wia=_wia,
+            request=request,
+            ATTESTATION_MAX_AGE=ATTESTATION_MAX_AGE,
+            CLOCK_SKEW=CLOCK_SKEW,
+            ALLOWED_ASYM_ALGS=ALLOWED_ASYM_ALGS,
+        )
+
+        self.verify_pop(
+            _wia=_wia,
+            _pop_raw=pop_raw,
+            POP_TIME_WINDOW=POP_TIME_WINDOW,
+            CLOCK_SKEW=CLOCK_SKEW,
+            ALLOWED_ASYM_ALGS=ALLOWED_ASYM_ALGS,
+        )
 
         # Get the header
         print("Header:")
@@ -480,42 +722,7 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
         print("\nPayload:")
         print(json.dumps(jws.jwt.payload(), indent=2))
 
-        logger.info(f"Verified WIA: ", _wia)
         # Should be a key in there
-
-        _jwk = _wia["cnf"]["jwk"]
-
-        print("\n1")
-        # _keyjar = import_jwks(_keyjar, {"keys": [_jwk]}, _wia["sub"])
-
-        """ if "kid" in _wia["cnf"]["jwk"]:
-            if _wia["cnf"]["jwk"]["kid"] != _wia["sub"]:
-                _keyjar = import_jwks(_keyjar, {"keys": [_jwk]}, _wia["cnf"]["jwk"]["kid"]) """
-
-        # have already saved the key that comes in the wia
-        # _verifier = JWT(_keyjar)
-
-        print("\n3")
-        logger.debug("Verifying the PoP")
-        try:
-            # _pop = _verifier.unpack(pop)
-
-            key = ECKey(**_jwk)
-            pop_jws = factory(pop)
-            pop_jws.verify_compact(pop, keys=[key])
-            print("\n4")
-        except (Invalid, MissingKey, BadSignature, IssuerNotFound) as err:
-            logger.exception("unpacking PoP")
-            raise ClientAuthenticationError(f"{err.__class__.__name__} {err}")
-        except Exception as err:
-            logger.exception("unpacking PoP")
-            raise err
-
-        """ if isinstance(_pop, Message):
-            _pop.verify() """
-
-        # Dynamically add/register client
-        # _c_info = {"client_id": _wia["sub"]}
 
         _c_info = {
             "client_id": request["client_id"],
@@ -528,11 +735,8 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
             if _val:
                 _c_info[key] = _val
 
-        # oas.context.cdb[_wia["sub"]] = _c_info
-
         oas.context.cdb[request["client_id"]] = _c_info
 
-        # return {"client_id": _wia["sub"], "jwt": _wia}
         return {"client_id": request["client_id"], "jwt": _wia}
 
 
@@ -647,7 +851,9 @@ def verify_client(
     for _method in (methods[meth] for meth in allowed_methods):
         print("\n-------------_method: ", _method)
         if not _method.is_usable(
-            request=request, authorization_token=authorization_token, http_info=http_info
+            request=request,
+            authorization_token=authorization_token,
+            http_info=http_info,
         ):
             print("\n-------------not usable: ", _method)
             continue
@@ -706,7 +912,8 @@ def verify_client(
 
         # Validate that the used method is allowed for this client/endpoint
         client_allowed_methods = _cinfo.get(
-            f"{endpoint.endpoint_name}_client_authn_method", _cinfo.get("client_authn_method", None)
+            f"{endpoint.endpoint_name}_client_authn_method",
+            _cinfo.get("client_authn_method", None),
         )
         if client_allowed_methods is not None and auth_info["method"] not in client_allowed_methods:
             logger.info(
