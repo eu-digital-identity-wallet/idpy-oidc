@@ -32,7 +32,6 @@ from idpyoidc.server.exception import UnknownClient
 from idpyoidc.util import importer
 from idpyoidc.util import sanitize
 from idpyoidc.node import topmost_unit
-from idpyoidc.key_import import import_jwks
 from cryptojwt.exception import IssuerNotFound
 
 
