@@ -150,9 +150,16 @@ class PublicAuthn(ClientAuthnMethod):
 
         if http_info is not None:
             _headers = http_info.get("headers", {})
-            if {"oauth-client-attestation", "oauth-client-attestation-pop"} <= {
-                k.lower() for k in _headers
-            }:
+            header_keys = {k.lower() for k in _headers}
+            if any(
+                h in header_keys
+                for h in (
+                    "oauth-client-attestation",
+                    "oauth-client-attestation-pop",
+                    "dpop",
+                    "authorization",
+                )
+            ):
                 return False
 
         return request and "client_id" in request
@@ -252,7 +259,7 @@ class BearerHeader(ClientSecretBasic):
         logger.debug(f"Client Auth method: {self.tag}")
         token = authorization_token.split(" ", 1)[1]
         _context = self.upstream_get("context")
-        client_id = ""
+        client_id = request["client_id"]
         if get_client_id_from_token:
             try:
                 client_id = get_client_id_from_token(_context, token, request)
@@ -828,12 +835,20 @@ def verify_client(
         authorization_token = http_info["headers"].get("authorization")
         if not authorization_token:
             authorization_token = http_info["headers"].get("Authorization")
+
+        if "dpop" in http_info["headers"]:
+            authorization_token = f"DPoP {http_info['headers'].get('dpop')}"
     else:
         authorization_token = None
+
+    print("\nverify_client authorization_token", authorization_token)
 
     auth_info = {}
 
     _context = endpoint.upstream_get("context")
+
+    print("\ncontext client_authn_methods: ", _context.client_authn_methods)
+
     methods = getattr(_context, "client_authn_methods", None)
 
     client_id = None

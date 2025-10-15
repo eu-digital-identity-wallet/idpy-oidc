@@ -155,7 +155,12 @@ class Endpoint(Node):
                 request.verify(keyjar=keyjar, opponent_id=client_id)
             else:
                 request.verify(keyjar=keyjar, opponent_id=client_id, **verify_args)
-        except (MissingRequiredAttribute, ValueError, MissingRequiredValue, ParameterError) as err:
+        except (
+            MissingRequiredAttribute,
+            ValueError,
+            MissingRequiredValue,
+            ParameterError,
+        ) as err:
             _error = "invalid_request"
             if isinstance(err, ValueError) and self.request_cls == RegistrationRequest:
                 if len(err.args) > 1:
@@ -200,6 +205,22 @@ class Endpoint(Node):
 
         _context = self.upstream_get("context")
         _keyjar = self.upstream_get("attribute", "keyjar")
+
+        conf = _context.conf.get("conf")
+
+        if (
+            "add_ons" in conf
+            and "dpop" in conf["add_ons"]
+            and "kwargs" in conf["add_ons"]["dpop"]
+            and "allowed_htu" in conf["add_ons"]["dpop"]["kwargs"]
+        ):
+
+            allowed_htu = (
+                conf.get("add_ons", {}).get("dpop", {}).get("kwargs", {}).get("allowed_htu")
+            )
+
+            if allowed_htu is not None:
+                kwargs["allowed_htu"] = allowed_htu
 
         if http_info is None:
             http_info = {}
@@ -253,7 +274,11 @@ class Endpoint(Node):
 
         # Do any endpoint specific parsing
         return self.do_post_parse_request(
-            request=req, client_id=_client_id, http_info=http_info, auth_info=auth_info, **kwargs
+            request=req,
+            client_id=_client_id,
+            http_info=http_info,
+            auth_info=auth_info,
+            **kwargs,
         )
 
     def client_authentication(self, request: Message, http_info: Optional[dict] = None, **kwargs):
@@ -294,7 +319,10 @@ class Endpoint(Node):
         return request
 
     def do_pre_construct(
-        self, response_args: dict, request: Optional[Union[Message, dict]] = None, **kwargs
+        self,
+        response_args: dict,
+        request: Optional[Union[Message, dict]] = None,
+        **kwargs,
     ) -> dict:
         _context = self.upstream_get("context")
         for meth in self.pre_construct:
