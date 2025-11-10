@@ -117,7 +117,8 @@ class Introspection(Endpoint):
         if not aud:
             aud = grant.resources
 
-        client_id = request["client_id"]
+        client_id = _session_info["client_id"]  # request["client_id"]
+
         try:
             _cinfo = _context.cdb[client_id]
             enforce_aud_restriction = _cinfo.get(
@@ -126,7 +127,7 @@ class Introspection(Endpoint):
         except:
             enforce_aud_restriction = self.enforce_aud_restriction
         if enforce_aud_restriction:
-            if request["client_id"] not in aud:
+            if client_id not in aud:
                 return {"response_args": _resp}
 
         _info = self._introspect(_token, _session_info["client_id"], _session_info["grant"])
@@ -154,5 +155,7 @@ class Introspection(Endpoint):
                 _resp.update(user_info)
 
         _resp["active"] = True
+
+        _resp["username"] = _session_info["user_id"]
 
         return {"response_args": _resp}

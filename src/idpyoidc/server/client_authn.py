@@ -1,5 +1,8 @@
 import base64
+import json
 import logging
+import time
+from datetime import datetime
 from typing import Callable
 from typing import Dict
 from typing import Optional
@@ -12,9 +15,12 @@ from cryptojwt.jwt import JWT
 from cryptojwt.jwt import utc_time_sans_frac
 from cryptojwt.utils import as_bytes
 from cryptojwt.utils import as_unicode
+from cryptojwt.jws.jws import factory
+
 
 from idpyoidc.message import Message
 from idpyoidc.message.oidc import JsonWebToken
+from idpyoidc.message.oauth2.device_authorization import WalletInstanceAttestationJWT
 from idpyoidc.message.oidc import verified_claim_name
 from idpyoidc.server.constant import JWT_BEARER
 from idpyoidc.server.exception import BearerTokenAuthenticationError
@@ -25,6 +31,9 @@ from idpyoidc.server.exception import ToOld
 from idpyoidc.server.exception import UnknownClient
 from idpyoidc.util import importer
 from idpyoidc.util import sanitize
+from idpyoidc.node import topmost_unit
+from cryptojwt.exception import IssuerNotFound
+
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +54,7 @@ class ClientAuthnMethod(object):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         """
@@ -81,6 +91,7 @@ class ClientAuthnMethod(object):
         self,
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
+        http_info: Optional[dict] = None,
     ):
         """
         Verify that this authentication method is applicable.
@@ -113,7 +124,7 @@ class NoneAuthn(ClientAuthnMethod):
 
     tag = "none"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         return request is not None
 
     def _verify(
@@ -121,6 +132,7 @@ class NoneAuthn(ClientAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         return {"client_id": request.get("client_id")}
@@ -134,7 +146,22 @@ class PublicAuthn(ClientAuthnMethod):
 
     tag = "public"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
+
+        if http_info is not None:
+            _headers = http_info.get("headers", {})
+            header_keys = {k.lower() for k in _headers}
+            if any(
+                h in header_keys
+                for h in (
+                    "oauth-client-attestation",
+                    "oauth-client-attestation-pop",
+                    "dpop",
+                    "authorization",
+                )
+            ):
+                return False
+
         return request and "client_id" in request
 
     def _verify(
@@ -142,6 +169,7 @@ class PublicAuthn(ClientAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         return {"client_id": request["client_id"]}
@@ -156,7 +184,7 @@ class ClientSecretBasic(ClientAuthnMethod):
 
     tag = "client_secret_basic"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if authorization_token is not None and authorization_token.startswith("Basic "):
             return True
         return False
@@ -166,6 +194,7 @@ class ClientSecretBasic(ClientAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         client_info = basic_authn(authorization_token)
@@ -186,7 +215,7 @@ class ClientSecretPost(ClientSecretBasic):
 
     tag = "client_secret_post"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if request is None:
             return False
         if "client_id" in request and "client_secret" in request:
@@ -198,6 +227,7 @@ class ClientSecretPost(ClientSecretBasic):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         _context = self.upstream_get("context")
@@ -212,7 +242,7 @@ class BearerHeader(ClientSecretBasic):
 
     tag = "bearer_header"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if authorization_token is not None and authorization_token.startswith("Bearer "):
             return True
         return False
@@ -222,13 +252,14 @@ class BearerHeader(ClientSecretBasic):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         get_client_id_from_token: Optional[Callable] = None,
         **kwargs,
     ):
         logger.debug(f"Client Auth method: {self.tag}")
         token = authorization_token.split(" ", 1)[1]
         _context = self.upstream_get("context")
-        client_id = ""
+        client_id = request["client_id"]
         if get_client_id_from_token:
             try:
                 client_id = get_client_id_from_token(_context, token, request)
@@ -249,7 +280,7 @@ class BearerBody(ClientSecretPost):
 
     tag = "bearer_body"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if request is not None and "access_token" in request:
             return True
         return False
@@ -259,6 +290,7 @@ class BearerBody(ClientSecretPost):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         get_client_id_from_token: Optional[Callable] = None,
         **kwargs,
     ):
@@ -276,7 +308,7 @@ class BearerBody(ClientSecretPost):
 
 class JWSAuthnMethod(ClientAuthnMethod):
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if request is None:
             return False
         if "client_assertion" in request:
@@ -288,6 +320,7 @@ class JWSAuthnMethod(ClientAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         key_type: Optional[str] = None,
         **kwargs,
     ):
@@ -356,6 +389,7 @@ class ClientSecretJWT(JWSAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         res = super()._verify(
@@ -377,6 +411,7 @@ class PrivateKeyJWT(JWSAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         res = super()._verify(
@@ -390,10 +425,331 @@ class PrivateKeyJWT(JWSAuthnMethod):
         return res
 
 
+from cryptojwt.jwk.ec import ECKey
+
+
+# AttestationJWTClientAuthentication
+class ClientAuthenticationAttestation(ClientAuthnMethod):
+    # based on https://www.ietf.org/archive/id/draft-ietf-oauth-attestation-based-client-auth-01.html
+    tag = "attest_jwt_client_auth"
+    assertion_type = "urn:ietf:params:oauth:client-assertion-type:jwt-client-attestation"
+    attestation_class = {"wallet-attestation+jwt": WalletInstanceAttestationJWT}
+    metadata = {}
+
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
+        if request is None and http_info is None:
+            return False
+
+        _headers = http_info.get("headers", {})
+        if {"oauth-client-attestation", "oauth-client-attestation-pop"} <= {
+            k.lower() for k in _headers
+        }:
+            return True
+
+        return False
+
+    def verify_pop(
+        self,
+        _wia,
+        _pop_raw,
+        POP_TIME_WINDOW,
+        CLOCK_SKEW,
+        ALLOWED_ASYM_ALGS,
+    ):
+        _now = time.time()
+
+        jws = factory(_pop_raw)
+        _pop_headers = jws.jwt.headers
+        _pop = jws.jwt.payload()
+
+        # 1. Check 'typ' in header
+        if _pop_headers.get("typ") != "oauth-client-attestation-pop+jwt":
+            logger.error("WIA 'typ' header is missing or incorrect.")
+            raise ClientAuthenticationError(
+                "Invalid Client Attestation format: missing or incorrect 'typ'."
+            )
+
+        # 2. Check 'alg' in header (REQUIRED)
+        _alg = _pop_headers.get("alg")
+        if not _alg:
+            logger.error("PoP header is missing the 'alg' parameter.")
+            raise ClientAuthenticationError("PoP must contain a signature algorithm ('alg').")
+
+        if _alg not in ALLOWED_ASYM_ALGS:
+            logger.error(f"PoP signature algorithm '{_alg}' is not in the allowed list.")
+            raise ClientAuthenticationError("PoP uses a disallowed signature algorithm.")
+
+        _jwk = _wia["cnf"]["jwk"]
+
+        # Verify the PoP JWS signature using the public key
+        try:
+            key = ECKey(**_jwk)
+            pop_jws = factory(_pop_raw)
+            pop_jws.verify_compact(_pop_raw, keys=[key])  # verify signature with public key
+            logger.info("✅ PoP signature verified using WIA public key.")
+        except (Invalid, MissingKey, BadSignature, IssuerNotFound) as err:
+            logger.exception("Failed PoP signature verification.")
+            raise ClientAuthenticationError(
+                f"PoP signature verification failed: {err.__class__.__name__}"
+            )
+        except Exception as err:
+            logger.exception("Unexpected error verifying PoP.")
+            raise ClientAuthenticationError(f"Unexpected error verifying PoP: {err}")
+
+        # 3. REQUIRED Claims
+        required_claims = ["iss", "aud", "jti", "iat"]
+        for claim in required_claims:
+            if claim not in _pop:
+                logger.error(f"PoP missing required claim: {claim}")
+                raise ClientAuthenticationError(
+                    f"Client Attestation PoP missing required claim: {claim}."
+                )
+
+        _iss = _pop.get("iss")
+        _aud = _pop.get("aud")
+        _jti = _pop.get("jti")
+        _iat = _pop.get("iat")
+        _nbf = _pop.get("nbf")
+
+        wia_sub = _wia.get("sub")
+        if _iss != wia_sub:
+            logger.error(f"PoP 'iss' ({_iss}) does not match WIA 'sub' ({wia_sub}).")
+            raise ClientAuthenticationError(
+                "PoP issuer ('iss') must match WIA subject ('sub') / client_id."
+            )
+
+        # 6. Check 'iat' freshness
+        # Must be within ± POP_TIME_WINDOW of current time
+        if abs(_now - _iat) > POP_TIME_WINDOW:
+            logger.error(
+                f"PoP 'iat' ({datetime.fromtimestamp(_iat)}) not within allowed window ({POP_TIME_WINDOW}s)."
+            )
+            raise ClientAuthenticationError("PoP 'iat' outside allowed freshness window.")
+
+        # 7. Check 'nbf' (if present)
+        if _nbf and (_now + CLOCK_SKEW) <= _nbf:
+            logger.error(f"PoP not yet valid (nbf: {datetime.fromtimestamp(_nbf)})")
+            raise ClientAuthenticationError("PoP is not yet valid (nbf in the future).")
+
+        logger.info("Verified Client Attestation PoP successfully.", extra={"jti": _jti})
+
+    def verify_oath_attestation(
+        self,
+        _wia_headers,
+        _wia,
+        request,
+        ATTESTATION_MAX_AGE,
+        CLOCK_SKEW,
+        ALLOWED_ASYM_ALGS,
+    ):
+        _now = time.time()
+
+        # 1. Check 'typ' in header
+        if _wia_headers.get("typ") != "oauth-client-attestation+jwt":
+            logger.error("WIA 'typ' header is missing or incorrect.")
+            raise ClientAuthenticationError(
+                "Invalid Client Attestation format: missing or incorrect 'typ'."
+            )
+
+        # 2. Check REQUIRED Claims: 'iss', 'sub', 'exp', 'cnf'
+        required_claims = ["iss", "sub", "exp", "cnf"]
+        for claim in required_claims:
+            if claim not in _wia:
+                logger.error(f"WIA missing required claim: {claim}")
+                raise ClientAuthenticationError(
+                    f"Client Attestation missing required claim: {claim}."
+                )
+
+        # 2. Check 'alg' in header (REQUIRED)
+        _alg = _wia_headers.get("alg")
+        if not _alg:
+            logger.error("WIA header is missing the 'alg' parameter.")
+            raise ClientAuthenticationError("WIA must contain a signature algorithm ('alg').")
+
+        if _alg not in ALLOWED_ASYM_ALGS:
+            logger.error(f"WIA signature algorithm '{_alg}' is not in the allowed list.")
+            raise ClientAuthenticationError("WIA uses a disallowed signature algorithm.")
+
+        try:
+            _jwk = _wia["cnf"]["jwk"]
+        except KeyError:
+            logger.error("WIA missing 'cnf.jwk' for PoP signature verification.")
+            raise ClientAuthenticationError("Missing public key in WIA 'cnf' claim.")
+
+        request_client_id = request.get("client_id")
+        wia_sub = _wia.get("sub")
+
+        if not request_client_id:
+            logger.error("Request body is missing the 'client_id' parameter.")
+            # Reject if the request context doesn't have the client_id to compare against
+            raise ClientAuthenticationError("Missing 'client_id' in request.")
+
+        if wia_sub != request_client_id:
+            logger.error(
+                f"WIA 'sub' ({wia_sub}) does not match request 'client_id' ({request_client_id})."
+            )
+            raise ClientAuthenticationError(
+                "Client Attestation subject ('sub') must match the request 'client_id'."
+            )
+
+        # 3. Check 'cnf' structure and 'jwk' existence
+        _jwk = _wia["cnf"].get("jwk")
+        if not _jwk or not isinstance(_jwk, dict):
+            logger.error("WIA 'cnf' claim missing required 'jwk'.")
+            raise ClientAuthenticationError("Client Attestation 'cnf' claim is malformed.")
+
+        # 3a. Ensure the JWK is NOT a private key
+        private_fields = {"d", "p", "q", "dp", "dq", "qi"}
+        found_private_fields = private_fields.intersection(_jwk.keys())
+        if found_private_fields:
+            logger.error(f"WIA 'jwk' contains private key parameters: {found_private_fields}")
+            raise ClientAuthenticationError(
+                "Client Attestation 'jwk' must not contain private key material."
+            )
+
+        # 4. Check 'exp' (Expiration Time) with clock skew
+        # The current time minus the skew must be BEFORE the expiration time.
+        if (_now - CLOCK_SKEW) >= _wia["exp"]:
+            logger.error(
+                f"WIA expired at {datetime.fromtimestamp(_wia['exp'])}, current time is too far past."
+            )
+            raise ClientAuthenticationError(
+                "Client Attestation has expired (expired time is before current time minus skew)."
+            )
+
+        # 5. Check 'nbf' (Not Before) - OPTIONAL but must be respected if present
+        _nbf = _wia.get("nbf")
+        if _nbf and (_now + CLOCK_SKEW) <= _nbf:
+            logger.error(f"WIA not yet valid (nbf: {datetime.fromtimestamp(_nbf)})")
+            raise ClientAuthenticationError("Client Attestation is not yet valid.")
+
+        # 6. Check 'iat' (Issued At) - OPTIONAL but used for ATTESTATION_MAX_AGE freshness
+        _iat = _wia.get("iat")
+        if _iat:
+            # Check freshness: iat must be within ATTESTATION_MAX_AGE seconds
+            if (_now - _iat) > ATTESTATION_MAX_AGE:
+                logger.error(f"WIA is too old (iat: {datetime.fromtimestamp(_iat)})")
+                raise ClientAuthenticationError("Client Attestation is too old (max age exceeded).")
+
+        # --- End WIA Claim Validity Checks ---
+
+        logger.info(f"Verified WIA: ", _wia)
+
+    def _verify(
+        self,
+        request: Optional[Union[dict, Message]] = None,
+        authorization_token: Optional[str] = None,
+        endpoint=None,  # Optional[Endpoint]
+        get_client_id_from_token: Optional[Callable] = None,
+        http_info: Optional[dict] = None,
+        **kwargs,
+    ):
+
+        ATTESTATION_MAX_AGE = 3600  # seconds: how fresh attestation must be
+        POP_TIME_WINDOW = 300  # seconds: PoP iat must be within +/- this window
+        CLOCK_SKEW = 30
+        # Allowed asymmetric signature algorithms (registered asymmetric JOSE algs)
+        ALLOWED_ASYM_ALGS = {
+            "ES256",
+            "ES384",
+            "ES512",
+            "RS256",
+            "RS384",
+            "RS512",
+            "PS256",
+            "PS384",
+            "PS512",
+        }
+
+        if not http_info or "headers" not in http_info:
+            logger.error("Missing http_info or headers")
+            raise ClientAuthenticationError("Missing http_info or headers")
+
+        headers = {k.lower(): v for k, v in http_info["headers"].items()}
+
+        if "oauth-client-attestation" not in headers:
+            logger.error("Missing OAuth-Client-Attestation header")
+            raise ClientAuthenticationError("Missing OAuth-Client-Attestation header")
+
+        if "oauth-client-attestation-pop" not in headers:
+            logger.error("Missing OAuth-Client-Attestation-PoP header")
+            raise ClientAuthenticationError("Missing OAuth-Client-Attestation-PoP header")
+
+        wia_raw = headers["oauth-client-attestation"]
+        pop_raw = headers["oauth-client-attestation-pop"]
+
+        if "," in wia_raw:
+            logger.error("OAuth-Client-Attestation header contains multiple values")
+            raise ClientAuthenticationError(
+                "OAuth-Client-Attestation header contains multiple values"
+            )
+
+        if "," in pop_raw:
+            logger.error("OAuth-Client-Attestation-PoP header contains multiple values")
+            raise ClientAuthenticationError(
+                "OAuth-Client-Attestation-PoP header contains multiple values"
+            )
+
+        logger.info(f"OAuth-Client-Attestation: {wia_raw}")
+        logger.info(f"OAuth-Client-Attestation-PoP: {pop_raw}")
+
+        oas = topmost_unit(self)
+
+        logger.info(f"oas: {oas.context.keyjar}")
+
+        jws = factory(wia_raw)
+
+        jws = factory(wia_raw)
+        _wia_headers = jws.jwt.headers
+        _wia = jws.jwt.payload()
+
+        self.verify_oath_attestation(
+            _wia_headers=_wia_headers,
+            _wia=_wia,
+            request=request,
+            ATTESTATION_MAX_AGE=ATTESTATION_MAX_AGE,
+            CLOCK_SKEW=CLOCK_SKEW,
+            ALLOWED_ASYM_ALGS=ALLOWED_ASYM_ALGS,
+        )
+
+        self.verify_pop(
+            _wia=_wia,
+            _pop_raw=pop_raw,
+            POP_TIME_WINDOW=POP_TIME_WINDOW,
+            CLOCK_SKEW=CLOCK_SKEW,
+            ALLOWED_ASYM_ALGS=ALLOWED_ASYM_ALGS,
+        )
+
+        # Get the header
+        print("Header:")
+        print(json.dumps(jws.jwt.headers, indent=2))
+
+        # Get the payload (decoded but not verified)
+        print("\nPayload:")
+        print(json.dumps(jws.jwt.payload(), indent=2))
+
+        # Should be a key in there
+
+        _c_info = {
+            "client_id": request["client_id"],
+            "redirect_uris": [(request["redirect_uri"], {})],
+        }
+
+        # Add metadata from the WIE/WIA
+        for key, val in self.metadata.items():
+            _val = _wia.get(key, None)
+            if _val:
+                _c_info[key] = _val
+
+        oas.context.cdb[request["client_id"]] = _c_info
+
+        return {"client_id": request["client_id"], "jwt": _wia}
+
+
 class RequestParam(ClientAuthnMethod):
     tag = "request_param"
 
-    def is_usable(self, request=None, authorization_token=None):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if request and "request" in request:
             return True
 
@@ -402,6 +758,7 @@ class RequestParam(ClientAuthnMethod):
         request: Optional[Union[dict, Message]] = None,
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         _context = self.upstream_get("context")
@@ -435,6 +792,7 @@ CLIENT_AUTHN_METHOD = dict(
     client_secret_jwt=ClientSecretJWT,
     private_key_jwt=PrivateKeyJWT,
     request_param=RequestParam,
+    wallet_attestation=ClientAuthenticationAttestation,
     public=PublicAuthn,
     none=NoneAuthn,
 )
@@ -471,16 +829,26 @@ def verify_client(
         possibly access token.
     """
 
+    print("\n-------------at client_auth verify_client------------------------")
+
     if http_info and "headers" in http_info:
         authorization_token = http_info["headers"].get("authorization")
         if not authorization_token:
             authorization_token = http_info["headers"].get("Authorization")
+
+        if "dpop" in http_info["headers"]:
+            authorization_token = f"DPoP {http_info['headers'].get('dpop')}"
     else:
         authorization_token = None
+
+    print("\nverify_client authorization_token", authorization_token)
 
     auth_info = {}
 
     _context = endpoint.upstream_get("context")
+
+    print("\ncontext client_authn_methods: ", _context.client_authn_methods)
+
     methods = getattr(_context, "client_authn_methods", None)
 
     client_id = None
@@ -488,21 +856,32 @@ def verify_client(
     if not allowed_methods:
         allowed_methods = list(methods.keys())  # If not specific for this endpoint then all
 
+    print("\n-------------allowed_methods: ", allowed_methods)
+    print("\n-------------http_info: ", http_info)
+
     _method = None
     _cdb = _cinfo = None
     _tested = []
     for _method in (methods[meth] for meth in allowed_methods):
-        if not _method.is_usable(request=request, authorization_token=authorization_token):
+        print("\n-------------_method: ", _method)
+        if not _method.is_usable(
+            request=request,
+            authorization_token=authorization_token,
+            http_info=http_info,
+        ):
+            print("\n-------------not usable: ", _method)
             continue
         try:
             logger.info(f"Verifying client authentication using {_method.tag}")
             _tested.append(_method.tag)
+
             auth_info = _method.verify(
                 keyjar=endpoint.upstream_get("attribute", "keyjar"),
                 request=request,
                 authorization_token=authorization_token,
                 endpoint=endpoint,
                 get_client_id_from_token=get_client_id_from_token,
+                http_info=http_info,
             )
         except (BearerTokenAuthenticationError, ClientAuthenticationError):
             raise
@@ -547,7 +926,8 @@ def verify_client(
 
         # Validate that the used method is allowed for this client/endpoint
         client_allowed_methods = _cinfo.get(
-            f"{endpoint.endpoint_name}_client_authn_method", _cinfo.get("client_authn_method", None)
+            f"{endpoint.endpoint_name}_client_authn_method",
+            _cinfo.get("client_authn_method", None),
         )
         if client_allowed_methods is not None and auth_info["method"] not in client_allowed_methods:
             logger.info(

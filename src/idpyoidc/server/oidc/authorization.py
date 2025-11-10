@@ -63,7 +63,7 @@ def re_authenticate(request, authn):
         if authn.done(request):
             return True
 
-    return False
+    return True
 
 
 class Authorization(authorization.Authorization):

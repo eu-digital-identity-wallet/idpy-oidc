@@ -1204,4 +1204,4 @@ def re_authenticate(request, authn) -> bool:
         logger.debug("Reauthenticate due to prompt=login")
         return True
 
-    return False
+    return True
