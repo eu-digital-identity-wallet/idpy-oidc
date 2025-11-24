@@ -107,12 +107,17 @@ def token_post_parse_request(request, client_id, context, **kwargs):
     if not _http_info:
         return request
 
+    if "dpop" not in _http_info["headers"]:
+        return request
+
     _dpop = DPoPProof().verify_header(_http_info["headers"]["dpop"])
 
     # The signature of the JWS is verified, now for checking the
     # content
+    allowed_htu = kwargs.get("allowed_htu")
 
-    if _dpop["htu"] != _http_info["url"]:
+    # if _dpop["htu"] != _http_info["url"]:
+    if _dpop.get("htu") not in allowed_htu:
         raise ValueError("htu in DPoP does not match the HTTP URI")
 
     if _dpop["htm"] != _http_info["method"]:
@@ -181,9 +186,14 @@ def token_args(context, client_id, token_args: Optional[dict] = None):
 
 def add_support(endpoint: dict, **kwargs):
     # Pick one endpoint
-    _endp_name = list(endpoint.keys())[0]
-    _endp = endpoint[_endp_name]
-    _endp.post_parse_request.append(token_post_parse_request)
+    # _endp_name = list(endpoint.keys())[0]
+
+    token_endpoint = endpoint.get("token")
+
+    token_endpoint.post_parse_request.append(token_post_parse_request)
+
+    # _endp = endpoint[_endp_name]
+    # _endp.post_parse_request.append(token_post_parse_request)
 
     _algs_supported = kwargs.get("dpop_signing_alg_values_supported")
     if not _algs_supported:
@@ -191,10 +201,10 @@ def add_support(endpoint: dict, **kwargs):
     else:
         _algs_supported = [alg for alg in _algs_supported if alg in get_signing_algs()]
 
-    _context = _endp.upstream_get("context")
+    _context = token_endpoint.upstream_get("context")
     _context.provider_info["dpop_signing_alg_values_supported"] = _algs_supported
     _context.add_on["dpop"] = {"algs_supported": _algs_supported}
-    _context.client_authn_methods["dpop"] = DPoPClientAuth
+    _context.client_authn_methods["dpop"] = DPoPClientAuth(BearerHeader)
 
     for _dpop_endpoint in kwargs.get("dpop_endpoints", ["userinfo"]):
         _endpoint = endpoint.get(_dpop_endpoint, None)
@@ -208,7 +218,13 @@ def add_support(endpoint: dict, **kwargs):
 class DPoPClientAuth(BearerHeader):
     tag = "dpop_client_auth"
 
-    def is_usable(self, request=None, authorization_token=None, http_headers=None):
+    def is_usable(
+        self,
+        request=None,
+        authorization_token=None,
+        http_headers=None,
+        http_info: Optional[dict] = None,
+    ):
         if authorization_token is not None and authorization_token.startswith("DPoP "):
             return True
         return False
@@ -219,10 +235,16 @@ class DPoPClientAuth(BearerHeader):
         authorization_token: Optional[str] = None,
         endpoint=None,  # Optional[Endpoint]
         get_client_id_from_token: Optional[Callable] = None,
+        http_info: Optional[dict] = None,
         **kwargs,
     ):
         # info contains token and client_id
         info = BearerHeader._verify(
-            self, request, authorization_token, endpoint, get_client_id_from_token, **kwargs
+            self,
+            request,
+            authorization_token,
+            endpoint,
+            get_client_id_from_token,
+            **kwargs,
         )
         return info
