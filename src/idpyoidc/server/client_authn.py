@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import time
+import os
 from datetime import datetime
 from typing import Callable
 from typing import Dict
@@ -16,7 +17,12 @@ from cryptojwt.jwt import utc_time_sans_frac
 from cryptojwt.utils import as_bytes
 from cryptojwt.utils import as_unicode
 from cryptojwt.jws.jws import factory
+from cryptography import x509
 
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptojwt.jwk.ec import ECKey
+from cryptojwt.jwk.rsa import RSAKey
+from cryptojwt.jws.jws import factory
 
 from idpyoidc.message import Message
 from idpyoidc.message.oidc import JsonWebToken
@@ -486,7 +492,7 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
             key = ECKey(**_jwk)
             pop_jws = factory(_pop_raw)
             pop_jws.verify_compact(_pop_raw, keys=[key])  # verify signature with public key
-            logger.info("✅ PoP signature verified using WIA public key.")
+            logger.info(" PoP signature verified using WIA public key.")
         except (Invalid, MissingKey, BadSignature, IssuerNotFound) as err:
             logger.exception("Failed PoP signature verification.")
             raise ClientAuthenticationError(
@@ -537,10 +543,12 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
         self,
         _wia_headers,
         _wia,
+        _wia_raw,
         request,
         ATTESTATION_MAX_AGE,
         CLOCK_SKEW,
         ALLOWED_ASYM_ALGS,
+        trusted_attesters,
     ):
         _now = time.time()
 
@@ -549,6 +557,102 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
             logger.error("WIA 'typ' header is missing or incorrect.")
             raise ClientAuthenticationError(
                 "Invalid Client Attestation format: missing or incorrect 'typ'."
+            )
+
+        _iss = _wia.get("iss")
+        if not _iss:
+            logger.error("WIA missing 'iss' claim.")
+            raise ClientAuthenticationError("WIA missing required 'iss' claim.")
+
+        signature_verified = False
+        verification_errors = []
+
+        for idx, attester_cert_pem in enumerate(trusted_attesters):
+            try:
+                # Load the certificate
+                cert = x509.load_pem_x509_certificate(attester_cert_pem.encode())
+                public_key = cert.public_key()
+
+                # Convert to JWK format for verification
+                if isinstance(public_key, ec.EllipticCurvePublicKey):
+                    numbers = public_key.public_numbers()
+                    curve_name = public_key.curve.name
+
+                    # Map curve names to JWK crv values
+                    curve_map = {
+                        "secp256r1": "P-256",
+                        "secp384r1": "P-384",
+                        "secp521r1": "P-521",
+                    }
+
+                    crv = curve_map.get(curve_name)
+                    if not crv:
+                        logger.debug(f"Attester cert {idx}: Unsupported curve {curve_name}")
+                        continue
+
+                    # Get coordinate byte lengths
+                    coord_byte_length = {
+                        "P-256": 32,
+                        "P-384": 48,
+                        "P-521": 66,
+                    }[crv]
+
+                    x_bytes = numbers.x.to_bytes(coord_byte_length, "big")
+                    y_bytes = numbers.y.to_bytes(coord_byte_length, "big")
+
+                    jwk_dict = {
+                        "kty": "EC",
+                        "crv": crv,
+                        "x": base64.urlsafe_b64encode(x_bytes).decode().rstrip("="),
+                        "y": base64.urlsafe_b64encode(y_bytes).decode().rstrip("="),
+                    }
+
+                elif isinstance(public_key, rsa.RSAPublicKey):
+                    numbers = public_key.public_numbers()
+
+                    n_bytes = numbers.n.to_bytes((numbers.n.bit_length() + 7) // 8, "big")
+                    e_bytes = numbers.e.to_bytes((numbers.e.bit_length() + 7) // 8, "big")
+
+                    jwk_dict = {
+                        "kty": "RSA",
+                        "n": base64.urlsafe_b64encode(n_bytes).decode().rstrip("="),
+                        "e": base64.urlsafe_b64encode(e_bytes).decode().rstrip("="),
+                    }
+                else:
+                    logger.debug(f"Attester cert {idx}: Unsupported key type {type(public_key)}")
+                    continue
+
+                # Create key and verify
+                if jwk_dict["kty"] == "EC":
+                    key = ECKey(**jwk_dict)
+                else:
+                    key = RSAKey(**jwk_dict)
+
+                wia_jws = factory(_wia_raw)
+
+                try:
+                    verified_payload = wia_jws.verify_compact(_wia_raw, keys=[key])
+                    logger.info(
+                        f"WIA signature verified with trusted attester (cert {idx}): {_iss}"
+                    )
+                    signature_verified = True
+                    break
+                except Exception as verify_error:
+                    raise verify_error
+
+            except Exception as e:
+                # Try next certificate
+                error_msg = f"Attester cert {idx}: {type(e).__name__}: {str(e)}"
+                logger.debug(error_msg)
+                verification_errors.append(error_msg)
+                continue
+
+        if not signature_verified:
+            logger.error(
+                f"WIA signature could not be verified with any trusted attester. Errors: {verification_errors}"
+            )
+            raise ClientAuthenticationError(
+                "WIA signature verification failed: no trusted attester matched."
             )
 
         # 2. Check REQUIRED Claims: 'iss', 'sub', 'exp', 'cnf'
@@ -693,6 +797,35 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
         logger.info(f"OAuth-Client-Attestation: {wia_raw}")
         logger.info(f"OAuth-Client-Attestation-PoP: {pop_raw}")
 
+        trusted_attesters_path = kwargs.get("trusted_attesters_path")
+        if not trusted_attesters_path:
+            logger.error("No trusted_attesters_path provided in kwargs")
+            raise ClientAuthenticationError("Missing trusted attesters configuration")
+
+        if not os.path.isdir(trusted_attesters_path):
+            logger.error(f"trusted_attesters_path is not a directory: {trusted_attesters_path}")
+            raise ClientAuthenticationError("trusted_attesters_path must be a directory")
+
+        # Load all PEM certificates from directory
+        trusted_attesters = []
+        for filename in os.listdir(trusted_attesters_path):
+            if filename.endswith((".pem")):
+                filepath = os.path.join(trusted_attesters_path, filename)
+                try:
+                    with open(filepath, "r") as f:
+                        cert_pem = f.read()
+                        trusted_attesters.append(cert_pem)
+                        logger.debug(f"Loaded attester certificate: {filename}")
+                except Exception as e:
+                    logger.warning(f"Failed to load certificate {filename}: {e}")
+                    continue
+
+        if not trusted_attesters:
+            logger.error(f"No valid certificates found in {trusted_attesters_path}")
+            raise ClientAuthenticationError("No trusted attester certificates found")
+
+        logger.info(f"Loaded {len(trusted_attesters)} trusted attester certificate(s)")
+
         oas = topmost_unit(self)
 
         logger.info(f"oas: {oas.context.keyjar}")
@@ -706,10 +839,12 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
         self.verify_oath_attestation(
             _wia_headers=_wia_headers,
             _wia=_wia,
+            _wia_raw=wia_raw,
             request=request,
             ATTESTATION_MAX_AGE=ATTESTATION_MAX_AGE,
             CLOCK_SKEW=CLOCK_SKEW,
             ALLOWED_ASYM_ALGS=ALLOWED_ASYM_ALGS,
+            trusted_attesters=trusted_attesters,
         )
 
         self.verify_pop(
@@ -882,6 +1017,7 @@ def verify_client(
                 endpoint=endpoint,
                 get_client_id_from_token=get_client_id_from_token,
                 http_info=http_info,
+                **kwargs,
             )
         except (BearerTokenAuthenticationError, ClientAuthenticationError):
             raise

@@ -222,6 +222,11 @@ class Endpoint(Node):
             if allowed_htu is not None:
                 kwargs["allowed_htu"] = allowed_htu
 
+        if "trusted_attesters_path" in conf["endpoint"]["token"]["kwargs"]:
+            kwargs["trusted_attesters_path"] = conf["endpoint"]["token"]["kwargs"][
+                "trusted_attesters_path"
+            ]
+
         if http_info is None:
             http_info = {}
 
