@@ -682,19 +682,27 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
 
         request_client_id = request.get("client_id")
         wia_sub = _wia.get("sub")
+        redirect_uri = request.get("redirect_uri")
 
-        if not request_client_id:
-            logger.error("Request body is missing the 'client_id' parameter.")
-            # Reject if the request context doesn't have the client_id to compare against
-            raise ClientAuthenticationError("Missing 'client_id' in request.")
+        if request_client_id is not None and redirect_uri != "preauth":
 
-        if wia_sub != request_client_id:
-            logger.error(
-                f"WIA 'sub' ({wia_sub}) does not match request 'client_id' ({request_client_id})."
-            )
-            raise ClientAuthenticationError(
-                "Client Attestation subject ('sub') must match the request 'client_id'."
-            )
+            if not request_client_id:
+                logger.error("Request body is missing the 'client_id' parameter.")
+                # Reject if the request context doesn't have the client_id to compare against
+                raise ClientAuthenticationError("Missing 'client_id' in request.")
+
+            if wia_sub != request_client_id:
+                logger.error(
+                    f"WIA 'sub' ({wia_sub}) does not match request 'client_id' ({request_client_id})."
+                )
+                raise ClientAuthenticationError(
+                    "Client Attestation subject ('sub') must match the request 'client_id'."
+                )
+
+            logger.info(f"WIA 'sub' matches request 'client_id': {wia_sub} == {request_client_id}")
+
+        else:
+            logger.info("No client_id. Skipping 'sub' vs 'client_id' check.")
 
         # 3. Check 'cnf' structure and 'jwk' existence
         _jwk = _wia["cnf"].get("jwk")
