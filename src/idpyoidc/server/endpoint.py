@@ -227,6 +227,11 @@ class Endpoint(Node):
                 "trusted_attesters_path"
             ]
 
+        if "trust_validator_url" in conf["endpoint"]["token"]["kwargs"]:
+            kwargs["trust_validator_url"] = conf["endpoint"]["token"]["kwargs"][
+                "trust_validator_url"
+            ]
+
         if http_info is None:
             http_info = {}
 
