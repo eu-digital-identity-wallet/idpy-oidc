@@ -222,6 +222,16 @@ class Endpoint(Node):
             if allowed_htu is not None:
                 kwargs["allowed_htu"] = allowed_htu
 
+        if "trusted_attesters_path" in conf["endpoint"]["token"]["kwargs"]:
+            kwargs["trusted_attesters_path"] = conf["endpoint"]["token"]["kwargs"][
+                "trusted_attesters_path"
+            ]
+
+        if "trust_validator_url" in conf["endpoint"]["token"]["kwargs"]:
+            kwargs["trust_validator_url"] = conf["endpoint"]["token"]["kwargs"][
+                "trust_validator_url"
+            ]
+
         if http_info is None:
             http_info = {}
 
