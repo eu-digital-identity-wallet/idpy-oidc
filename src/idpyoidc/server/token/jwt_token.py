@@ -1,6 +1,4 @@
-from typing import Callable
-from typing import Optional
-from typing import Union
+from typing import Callable, Optional, Union
 
 from cryptojwt import JWT
 from cryptojwt.jws.exception import JWSException
@@ -11,10 +9,8 @@ from idpyoidc.server.exception import ToOld
 from ...message import Message
 from ...message.oauth2 import JWTAccessToken
 from ..constant import DEFAULT_TOKEN_LIFETIME
-from . import Token
-from . import is_expired
-from .exception import UnknownToken
-from .exception import WrongTokenClass
+from . import Token, is_expired
+from .exception import UnknownToken, WrongTokenClass
 
 
 class JWTToken(Token):
@@ -30,7 +26,7 @@ class JWTToken(Token):
         token_type: str = "Bearer",
         profile: Optional[Union[Message, str]] = JWTAccessToken,
         with_jti: Optional[bool] = False,
-        **kwargs
+        **kwargs,
     ):
         Token.__init__(self, token_class, **kwargs)
         self.token_type = token_type
@@ -56,6 +52,24 @@ class JWTToken(Token):
 
     def load_custom_claims(self, payload: dict = None):
         # inherit me and do your things here
+        if payload is None:
+            payload = {}
+
+        # 1. Try to get client_id directly from payload, or fall back to looking up the session
+        client_id = payload.get("client_id")
+        if not client_id and payload.get("sid"):
+            try:
+                _context = self.upstream_get("context")
+                session_info = _context.session_manager.get_session_info(payload["sid"])
+                client_id = session_info.get("client_id")
+            except Exception:
+                pass
+
+        # 2. If we found the client, check if they have a wia_sub saved in the CDB
+        if client_id and self.cdb:
+            client_info = self.cdb.get(client_id, {})
+            if "client_status" in client_info:
+                payload["client_status"] = client_info["client_status"]
         return payload
 
     def __call__(
@@ -65,7 +79,7 @@ class JWTToken(Token):
         usage_rules: Optional[dict] = None,
         profile: Optional[Message] = None,
         with_jti: Optional[bool] = None,
-        **payload
+        **payload,
     ) -> str:
         """
         Return a token.
@@ -112,7 +126,8 @@ class JWTToken(Token):
 
     def get_payload(self, token):
         verifier = JWT(
-            key_jar=self.upstream_get("attribute", "keyjar"), allowed_sign_algs=[self.alg]
+            key_jar=self.upstream_get("attribute", "keyjar"),
+            allowed_sign_algs=[self.alg],
         )
         try:
             _payload = verifier.unpack(token)

@@ -1,15 +1,15 @@
 import json
 import logging
-from typing import Callable
-from typing import Optional
-from typing import Union
+from typing import Callable, Optional, Union
 from urllib.parse import urlparse
 
 from cryptojwt.exception import IssuerNotFound
 
-from idpyoidc.exception import MissingRequiredAttribute
-from idpyoidc.exception import MissingRequiredValue
-from idpyoidc.exception import ParameterError
+from idpyoidc.exception import (
+    MissingRequiredAttribute,
+    MissingRequiredValue,
+    ParameterError,
+)
 from idpyoidc.message import Message
 from idpyoidc.message.oauth2 import ResponseMessage
 from idpyoidc.message.oidc import RegistrationRequest
@@ -136,7 +136,9 @@ class Endpoint(Node):
             self.client_authn_method = _methods
             if self.auth_method_attribute:
                 kwargs[self.auth_method_attribute] = _methods
-        elif _methods is not None:  # [] or '' or something not None but regarded as nothing.
+        elif (
+            _methods is not None
+        ):  # [] or '' or something not None but regarded as nothing.
             self.client_authn_method = ["none"]  # Ignore default value
         # self.endpoint_info = construct_provider_info(self.default_capabilities, **kwargs)
         return kwargs
@@ -214,9 +216,11 @@ class Endpoint(Node):
             and "kwargs" in conf["add_ons"]["dpop"]
             and "allowed_htu" in conf["add_ons"]["dpop"]["kwargs"]
         ):
-
             allowed_htu = (
-                conf.get("add_ons", {}).get("dpop", {}).get("kwargs", {}).get("allowed_htu")
+                conf.get("add_ons", {})
+                .get("dpop", {})
+                .get("kwargs", {})
+                .get("allowed_htu")
             )
 
             if allowed_htu is not None:
@@ -230,6 +234,11 @@ class Endpoint(Node):
         if "trust_validator_url" in conf["endpoint"]["token"]["kwargs"]:
             kwargs["trust_validator_url"] = conf["endpoint"]["token"]["kwargs"][
                 "trust_validator_url"
+            ]
+
+        if "status_validator_url" in conf["endpoint"]["token"]["kwargs"]:
+            kwargs["status_validator_url"] = conf["endpoint"]["token"]["kwargs"][
+                "status_validator_url"
             ]
 
         if http_info is None:
@@ -248,7 +257,9 @@ class Endpoint(Node):
                         verify=_context.httpc_params["verify"],
                         **kwargs,
                     )
-                elif self.request_format == "url":  # A whole URL not just the query part
+                elif (
+                    self.request_format == "url"
+                ):  # A whole URL not just the query part
                     parts = urlparse(request)
                     scheme, netloc, path, params, query, fragment = parts[:6]
                     req = _cls_inst.deserialize(query, "urlencoded")
@@ -291,7 +302,9 @@ class Endpoint(Node):
             **kwargs,
         )
 
-    def client_authentication(self, request: Message, http_info: Optional[dict] = None, **kwargs):
+    def client_authentication(
+        self, request: Message, http_info: Optional[dict] = None, **kwargs
+    ):
         """
         Do client authentication
 
@@ -305,7 +318,9 @@ class Endpoint(Node):
 
         get_client_id_from_token = kwargs.get("get_client_id_from_token")
         if not get_client_id_from_token:
-            kwargs["get_client_id_from_token"] = getattr(self, "get_client_id_from_token", None)
+            kwargs["get_client_id_from_token"] = getattr(
+                self, "get_client_id_from_token", None
+            )
 
         authn_info = verify_client(request=request, http_info=http_info, **kwargs)
 
