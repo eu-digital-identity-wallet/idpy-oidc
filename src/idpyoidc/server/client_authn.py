@@ -568,17 +568,21 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
 
         Returns True if revoked, False if valid.
         """
-        payload = {"idx": status_idx, "uri": status_uri}
+        payload = {
+            "idx": status_idx,
+            "uri": status_uri,
+            "validation_context": "PIDStatus",
+        }
         headers = {"accept": "application/json", "Content-Type": "application/json"}
 
         response = requests.post(
-            f"{url}/status/check", json=payload, headers=headers, timeout=timeout
+            f"{url}", json=payload, headers=headers, timeout=timeout
         )
         response.raise_for_status()
         data = response.json()
 
         logger.info(f"WIA revocation check response: {data}")
-        return bool(data.get("revoked", False))
+        return data.get("valid") is False
 
     def call_trust_validator(
         self, url: str, chain: list[str], verification_context: str, timeout: int = 10
