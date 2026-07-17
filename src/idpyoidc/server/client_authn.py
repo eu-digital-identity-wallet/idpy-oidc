@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptojwt.exception import BadSignature, Invalid, IssuerNotFound, MissingKey
 from cryptojwt.jwk.ec import ECKey
 from cryptojwt.jwk.rsa import RSAKey
+from cryptojwt.jws.exception import NoSuitableSigningKeys
 from cryptojwt.jws.jws import factory
 from cryptojwt.jwt import JWT, utc_time_sans_frac
 from cryptojwt.utils import as_bytes, as_unicode
@@ -120,9 +121,7 @@ class NoneAuthn(ClientAuthnMethod):
 
     tag = "none"
 
-    def is_usable(
-        self, request=None, authorization_token=None, http_info: Optional[dict] = None
-    ):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         return request is not None
 
     def _verify(
@@ -144,9 +143,7 @@ class PublicAuthn(ClientAuthnMethod):
 
     tag = "public"
 
-    def is_usable(
-        self, request=None, authorization_token=None, http_info: Optional[dict] = None
-    ):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
 
         if http_info is not None:
             _headers = http_info.get("headers", {})
@@ -184,9 +181,7 @@ class ClientSecretBasic(ClientAuthnMethod):
 
     tag = "client_secret_basic"
 
-    def is_usable(
-        self, request=None, authorization_token=None, http_info: Optional[dict] = None
-    ):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if authorization_token is not None and authorization_token.startswith("Basic "):
             return True
         return False
@@ -217,9 +212,7 @@ class ClientSecretPost(ClientSecretBasic):
 
     tag = "client_secret_post"
 
-    def is_usable(
-        self, request=None, authorization_token=None, http_info: Optional[dict] = None
-    ):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if request is None:
             return False
         if "client_id" in request and "client_secret" in request:
@@ -235,10 +228,7 @@ class ClientSecretPost(ClientSecretBasic):
         **kwargs,
     ):
         _context = self.upstream_get("context")
-        if (
-            _context.cdb[request["client_id"]]["client_secret"]
-            == request["client_secret"]
-        ):
+        if _context.cdb[request["client_id"]]["client_secret"] == request["client_secret"]:
             return {"client_id": request["client_id"]}
         else:
             raise ClientAuthenticationError("secrets doesn't match")
@@ -249,12 +239,8 @@ class BearerHeader(ClientSecretBasic):
 
     tag = "bearer_header"
 
-    def is_usable(
-        self, request=None, authorization_token=None, http_info: Optional[dict] = None
-    ):
-        if authorization_token is not None and authorization_token.startswith(
-            "Bearer "
-        ):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
+        if authorization_token is not None and authorization_token.startswith("Bearer "):
             return True
         return False
 
@@ -278,7 +264,7 @@ class BearerHeader(ClientSecretBasic):
                 raise BearerTokenAuthenticationError("Expired token")
             except KeyError:
                 raise BearerTokenAuthenticationError("Unknown token")
-            except Exception as err:
+            except Exception:
                 logger.debug(f"Exception in {self.tag}")
 
         return {"token": token, "client_id": client_id, "method": self.tag}
@@ -291,9 +277,7 @@ class BearerBody(ClientSecretPost):
 
     tag = "bearer_body"
 
-    def is_usable(
-        self, request=None, authorization_token=None, http_info: Optional[dict] = None
-    ):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if request is not None and "access_token" in request:
             return True
         return False
@@ -320,9 +304,8 @@ class BearerBody(ClientSecretPost):
 
 
 class JWSAuthnMethod(ClientAuthnMethod):
-    def is_usable(
-        self, request=None, authorization_token=None, http_info: Optional[dict] = None
-    ):
+
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if request is None:
             return False
         if "client_assertion" in request:
@@ -351,9 +334,7 @@ class JWSAuthnMethod(ClientAuthnMethod):
         if _sign_alg and _sign_alg.startswith("HS"):
             if key_type == "private_key":
                 raise AttributeError("Wrong key type")
-            keys = _keyjar.get(
-                "sig", "oct", ca_jwt["iss"], ca_jwt.jws_header.get("kid")
-            )
+            keys = _keyjar.get("sig", "oct", ca_jwt["iss"], ca_jwt.jws_header.get("kid"))
             _secret = _context.cdb[ca_jwt["iss"]].get("client_secret")
             if _secret and keys[0].key != as_bytes(_secret):
                 raise AttributeError("Oct key used for signing not client_secret")
@@ -441,7 +422,6 @@ class PrivateKeyJWT(JWSAuthnMethod):
         return res
 
 
-from cryptojwt.jwk.ec import ECKey
 
 
 # AttestationJWTClientAuthentication
@@ -510,12 +490,14 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
         # Verify the PoP JWS signature using the public key
         try:
             key = ECKey(**_jwk)
+            if "kid" in _pop_headers:
+                    key.kid = _pop_headers["kid"]
             pop_jws = factory(_pop_raw)
             pop_jws.verify_compact(
                 _pop_raw, keys=[key]
             )  # verify signature with public key
             logger.info(" PoP signature verified using WIA public key.")
-        except (Invalid, MissingKey, BadSignature, IssuerNotFound) as err:
+        except (Invalid, MissingKey, BadSignature, IssuerNotFound, NoSuitableSigningKeys) as err:
             logger.exception("Failed PoP signature verification.")
             raise ClientAuthenticationError(
                 f"PoP signature verification failed: {err.__class__.__name__}"
@@ -568,11 +550,7 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
 
         Returns True if revoked, False if valid.
         """
-        payload = {
-            "idx": status_idx,
-            "uri": status_uri,
-            "validation_context": "PIDStatus",
-        }
+        payload = {"idx": status_idx, "uri": status_uri, "validation_context": "PIDStatus"}
         headers = {"accept": "application/json", "Content-Type": "application/json"}
 
         response = requests.post(
@@ -909,7 +887,7 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
                 "No status_list_svc_url configured; skipping WIA revocation check."
             )
 
-        logger.info(f"Verified WIA: ", _wia)
+        logger.info("Verified WIA: ", _wia)
 
     def _verify(
         self,
@@ -1065,15 +1043,13 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
 
         oas.context.cdb[request["client_id"]] = _c_info
 
-        return {"client_id": request["client_id"], "jwt": _wia}
 
+        return {"client_id": request["client_id"], "jwt": _wia}
 
 class RequestParam(ClientAuthnMethod):
     tag = "request_param"
 
-    def is_usable(
-        self, request=None, authorization_token=None, http_info: Optional[dict] = None
-    ):
+    def is_usable(self, request=None, authorization_token=None, http_info: Optional[dict] = None):
         if request and "request" in request:
             return True
 
@@ -1178,9 +1154,7 @@ def verify_client(
     client_id = None
     allowed_methods = getattr(endpoint, "client_authn_method")
     if not allowed_methods:
-        allowed_methods = list(
-            methods.keys()
-        )  # If not specific for this endpoint then all
+        allowed_methods = list(methods.keys())  # If not specific for this endpoint then all
 
     print("\n-------------allowed_methods: ", allowed_methods)
     print("\n-------------http_info: ", http_info)
@@ -1256,10 +1230,7 @@ def verify_client(
             f"{endpoint.endpoint_name}_client_authn_method",
             _cinfo.get("client_authn_method", None),
         )
-        if (
-            client_allowed_methods is not None
-            and auth_info["method"] not in client_allowed_methods
-        ):
+        if client_allowed_methods is not None and auth_info["method"] not in client_allowed_methods:
             logger.info(
                 f"Allowed methods for client: {client_id} at endpoint: {endpoint.name} are: "
                 f"`{', '.join(client_allowed_methods)}`"
@@ -1268,7 +1239,7 @@ def verify_client(
             continue
         break
 
-    logger.debug(f"Authn methods applied")
+    logger.debug("Authn methods applied")
     logger.debug(f"Method tested: {_tested}")
 
     # store what authn method was used
