@@ -3,13 +3,13 @@ from idpyoidc.message import (
     OPTIONAL_LIST_OF_STRINGS,
     REQUIRED_LIST_OF_STRINGS,
     SINGLE_OPTIONAL_INT,
+    SINGLE_OPTIONAL_STRING,
+    SINGLE_REQUIRED_INT,
     SINGLE_REQUIRED_JSON,
+    SINGLE_REQUIRED_STRING,
+    Message,
+    oidc,
 )
-from idpyoidc.message import SINGLE_OPTIONAL_STRING
-from idpyoidc.message import SINGLE_REQUIRED_INT
-from idpyoidc.message import SINGLE_REQUIRED_STRING
-from idpyoidc.message import Message
-from idpyoidc.message import oidc
 
 
 class AuthorizationRequest(Message):
@@ -41,19 +41,41 @@ class AccessTokenRequest(oidc.AccessTokenRequest):
                     raise MissingRequiredAttribute(claim)
 
 
-class WalletInstanceAttestationJWT(Message):
+class ClientStatus(Message):
+    """
+    The WIA `client_status` object (Section 2.3.1 / 2.4.1).
+    Represents revocation state of the Wallet Instance, plus the
+    revocation-maintenance commitment period.
+    """
+
     c_param = {
-        "iss": SINGLE_REQUIRED_STRING,
-        # "sub": SINGLE_REQUIRED_STRING,
-        "iat": SINGLE_REQUIRED_INT,
-        "exp": SINGLE_REQUIRED_INT,
-        "aal": SINGLE_REQUIRED_STRING,
-        "cnf": SINGLE_REQUIRED_JSON,
-        # "attested_security_context": SINGLE_OPTIONAL_STRING,
-        "authorization_endpoint": SINGLE_OPTIONAL_STRING,
-        "response_types_supported": OPTIONAL_LIST_OF_STRINGS,
-        "response_modes_supported": OPTIONAL_LIST_OF_STRINGS,
-        "vp_formats_supported": SINGLE_REQUIRED_JSON,
-        "request_object_signing_alg_values_supported": REQUIRED_LIST_OF_STRINGS,
-        "presentation_definition_uri_supported": oidc.SINGLE_OPTIONAL_BOOLEAN,
+        "status": SINGLE_REQUIRED_JSON,  # nested status_list reference
+        "exp": SINGLE_REQUIRED_INT,  # revocation maintenance expiry,
+    }
+
+
+class WalletInstanceAttestationJWT(Message):
+    """
+    Wallet Instance Attestation (WIA) payload per TS3 v1.5.2, Section 2.3.1.
+    """
+
+    c_param = {
+        # Required by Appendix E of OID4VCI (the underlying wallet-attestation
+        # format) and by this spec
+        "sub": SINGLE_REQUIRED_STRING,  # = client_id
+        "exp": SINGLE_REQUIRED_INT,  # technical token expiry,
+        # TTL < 24h from integrity check
+        "cnf": SINGLE_REQUIRED_JSON,  # holder PoP key
+        # EUDI-specific additions, Section 2.3.1
+        "wallet_name": SINGLE_REQUIRED_STRING,  # Wallet Solution identifier,
+        # as on the Wallet Provider Trusted List
+        "wallet_version": SINGLE_REQUIRED_STRING,  # Wallet Solution version
+        "wallet_solution_certification_information": SINGLE_REQUIRED_JSON,
+        "client_status": SINGLE_REQUIRED_JSON,  # { status: {...}, exp: ... }
+        # SHOULD, not REQUIRED
+        "wallet_link": SINGLE_OPTIONAL_STRING,  # info URI about Wallet Solution
+        # Optional freshness claims used by your PoP/attestation freshness checks
+        # (not formally required by TS3 itself, but commonly carried)
+        "iat": SINGLE_OPTIONAL_INT,
+        "nbf": SINGLE_OPTIONAL_INT,
     }
