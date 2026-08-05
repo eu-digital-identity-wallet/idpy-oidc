@@ -1,10 +1,6 @@
 # Change Log
-All notable changes to this project will be documented in this file.
 
-The format is based on the [KeepAChangeLog] project.
+## 0.1.0
 
-[KeepAChangeLog]: http://keepachangelog.com/
-
-## 0.1.0 [Unreleased]
-
-No change log folks. Sorry.
+### Changed
+- Updated implementation to align with EUDI TS3 v1.5 specification.
