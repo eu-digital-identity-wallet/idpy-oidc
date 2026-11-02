@@ -1,5 +1,7 @@
 import json
 import logging
+from contextvars import ContextVar
+from typing import Optional
 
 from idpyoidc.util import importer
 
@@ -8,6 +10,25 @@ from .exception import OidcEndpointError
 logger = logging.getLogger(__name__)
 
 OAUTH2_NOCACHE_HEADERS = [("Pragma", "no-cache"), ("Cache-Control", "no-store")]
+
+#: Issuer identifier the current request is answered as, set by an application
+#: that serves several issuers (e.g. one per URL path). ``None``: the configured
+#: ``context.issuer``.
+CURRENT_ISSUER: ContextVar = ContextVar("current_issuer", default=None)
+
+
+def current_issuer(context) -> Optional[str]:
+    """The issuer identifier of the current request (see :data:`CURRENT_ISSUER`)."""
+    return CURRENT_ISSUER.get() or getattr(context, "issuer", None)
+
+
+def endpoint_url(endpoint) -> Optional[str]:
+    """The URL of ``endpoint`` under the current request's issuer."""
+    _issuer = CURRENT_ISSUER.get()
+    _path = getattr(endpoint, "endpoint_path", "")
+    if _issuer and _path:
+        return f"{_issuer}/{_path}"
+    return getattr(endpoint, "full_path", None)
 
 
 def build_endpoints(conf, upstream_get, issuer):

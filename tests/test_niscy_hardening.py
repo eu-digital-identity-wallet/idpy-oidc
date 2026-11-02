@@ -215,3 +215,32 @@ class TestJarEncryptionSettings:
         jar.add_support({"authorization": service}, request_object_encryption_alg="ECDH-ES",
                         request_object_encryption_enc="A128GCM")
         assert context.add_on["jar"]["request_object_encryption_alg"] == "ECDH-ES"
+
+
+class TestCurrentIssuer:
+    """An application serving several issuers sets CURRENT_ISSUER per request."""
+
+    def test_falls_back_to_the_configured_issuer(self):
+        from idpyoidc.server.util import current_issuer
+
+        assert current_issuer(SimpleNamespace(issuer="https://as.example")) == "https://as.example"
+
+    def test_current_issuer_wins(self):
+        from idpyoidc.server.util import CURRENT_ISSUER, current_issuer
+
+        marker = CURRENT_ISSUER.set("https://as.example/fe")
+        try:
+            assert current_issuer(SimpleNamespace(issuer="https://as.example")) == "https://as.example/fe"
+        finally:
+            CURRENT_ISSUER.reset(marker)
+
+    def test_endpoint_url_under_the_current_issuer(self):
+        from idpyoidc.server.util import CURRENT_ISSUER, endpoint_url
+
+        endpoint = SimpleNamespace(endpoint_path="token", full_path="https://as.example/token")
+        assert endpoint_url(endpoint) == "https://as.example/token"
+        marker = CURRENT_ISSUER.set("https://as.example/fe")
+        try:
+            assert endpoint_url(endpoint) == "https://as.example/fe/token"
+        finally:
+            CURRENT_ISSUER.reset(marker)

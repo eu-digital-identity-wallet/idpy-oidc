@@ -32,6 +32,7 @@ from idpyoidc.server.exception import (
     ToOld,
     UnknownClient,
 )
+from idpyoidc.server.util import current_issuer, endpoint_url
 from idpyoidc.util import importer, sanitize
 
 logger = logging.getLogger(__name__)
@@ -357,7 +358,7 @@ class JWSAuthnMethod(ClientAuthnMethod):
         logger.debug("authntoken: {}".format(authtoken))
 
         if endpoint is None or not endpoint:
-            if _context.issuer in ca_jwt["aud"]:
+            if current_issuer(_context) in ca_jwt["aud"]:
                 pass
             else:
                 raise InvalidToken("Not for me!")
@@ -829,13 +830,13 @@ class ClientAuthenticationAttestation(ClientAuthnMethod):
         return trusted_attesters
 
     def _audiences(self, endpoint, pop_allowed_aud=None) -> list:
-        """What the PoP 'aud' may be: this server's issuer identifier, the endpoint URL, or
-        one of ``pop_allowed_aud`` (the issuer identifiers of the frontends that relay
-        requests here and publish their own authorization server metadata)."""
+        """What the PoP 'aud' may be: the issuer identifier the request is answered as
+        (see :data:`idpyoidc.server.util.CURRENT_ISSUER`), the endpoint URL under it,
+        or one of ``pop_allowed_aud``."""
         _context = topmost_unit(self).context
-        _aud = [getattr(_context, "issuer", None)]
+        _aud = [current_issuer(_context)]
         if endpoint is not None:
-            _aud.append(getattr(endpoint, "full_path", None))
+            _aud.append(endpoint_url(endpoint))
         _aud.extend(pop_allowed_aud or [])
         return [a for a in _aud if a]
 

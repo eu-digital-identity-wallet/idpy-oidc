@@ -264,6 +264,19 @@ def test_pop_audience_unlisted_frontend(method, pki, anchors):
         )
 
 
+def test_pop_audience_current_issuer(method, pki, anchors):
+    """With a per-request issuer, the PoP names that issuer, not the configured one."""
+    from idpyoidc.server.util import CURRENT_ISSUER
+
+    marker = CURRENT_ISSUER.set(ISSUER + "/frontend-a")
+    try:
+        assert authenticate(method, make_wia(pki), make_pop(pki, aud=ISSUER + "/frontend-a"), trusted_attesters_path=anchors)
+        with pytest.raises(ClientAuthenticationError, match="'aud'"):
+            authenticate(method, make_wia(pki), make_pop(pki, aud=ISSUER + "/frontend-b"), trusted_attesters_path=anchors)
+    finally:
+        CURRENT_ISSUER.reset(marker)
+
+
 def test_pop_wrong_issuer(method, pki, anchors):
     with pytest.raises(ClientAuthenticationError, match="'iss'"):
         authenticate(method, make_wia(pki), make_pop(pki, iss="someone-else"), trusted_attesters_path=anchors)

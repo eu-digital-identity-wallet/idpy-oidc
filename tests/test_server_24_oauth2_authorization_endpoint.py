@@ -321,6 +321,18 @@ class TestEndpoint(object):
         assert _query
         assert "code" in _query
 
+    def test_iss_is_the_current_issuer(self):
+        """RFC 9207 iss names the issuer the request is answered as."""
+        from idpyoidc.server.util import CURRENT_ISSUER
+
+        session_id = self._create_session(AUTH_REQ)
+        marker = CURRENT_ISSUER.set("https://example.com/frontend-a")
+        try:
+            _resp = self.endpoint.authz_part2(request=AUTH_REQ, session_id=session_id)
+        finally:
+            CURRENT_ISSUER.reset(marker)
+        assert _resp["response_args"]["iss"] == "https://example.com/frontend-a"
+
     def test_do_response_code_token(self):
         """UnAuthorized Client"""
         _orig_req = AUTH_REQ_DICT.copy()

@@ -19,6 +19,7 @@ from idpyoidc.exception import ImproperlyConfigured
 from idpyoidc.exception import ParameterError
 from idpyoidc.exception import URIError
 from idpyoidc.message import Message
+from idpyoidc.server.util import current_issuer
 from idpyoidc.message import oauth2
 from idpyoidc.message.oauth2 import AuthorizationRequest
 from idpyoidc.message.oidc import AuthorizationResponse
@@ -1182,7 +1183,7 @@ class Authorization(Endpoint):
 
         # Mix-Up mitigation
         if "response_args" in resp_info:
-            resp_info["response_args"]["iss"] = _context.issuer
+            resp_info["response_args"]["iss"] = current_issuer(_context)
             resp_info["response_args"]["client_id"] = request["client_id"]
 
         return resp_info

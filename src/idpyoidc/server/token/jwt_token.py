@@ -6,6 +6,7 @@ from cryptojwt.jws.exception import JWSException
 from cryptojwt.utils import importer
 
 from idpyoidc.server.exception import ToOld
+from idpyoidc.server.util import CURRENT_ISSUER
 
 from ...message import Message
 from ...message.oauth2 import JWTAccessToken
@@ -114,7 +115,7 @@ class JWTToken(Token):
             lifetime = self.lifetime
         signer = JWT(
             key_jar=self.upstream_get("attribute", "keyjar"),
-            iss=self.issuer,
+            iss=CURRENT_ISSUER.get() or self.issuer,
             lifetime=lifetime,
             sign_alg=self.alg,
         )
