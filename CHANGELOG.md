@@ -30,7 +30,7 @@
 - Token endpoint `kwargs`: `pop_allowed_aud` (extra wallet attestation PoP `aud` values) and `status_validation_context` (default `WalletOrKeyStorageStatus`, was `PIDStatus`).
 - `tests/test_niscy_hardening.py`, and about 800 unit tests (`tests/test_cov_*.py`) for modules with little coverage: 74% -> 88%.
 - Bugs found by those tests are pinned as `xfail(strict=True)` tests whose reason starts with `BUG:`.
-- `idpyoidc.server.util.CURRENT_ISSUER`: an application serving several issuers (e.g. one per URL path) sets the request's issuer; the authorization response `iss` (RFC 9207), access, refresh and ID token `iss`, introspection `iss`, PoP and client assertion `aud` follow it.
+- `idpyoidc.server.util.CURRENT_ISSUER`: an application serving several issuers (e.g. one per URL path) sets the request's issuer; the authorization response `iss` (RFC 9207), access, refresh and ID token `iss`, introspection `iss`, PoP and client assertion `aud`, and the DPoP `allowed_htu` / `par_allowed_htu` follow it.
 
 ### Changed
 - `EudiwIssuer` hand-off JWTs expire (`token_lifetime`, default 1800 s) and must be signed by this server.

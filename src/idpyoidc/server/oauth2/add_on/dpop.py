@@ -20,6 +20,7 @@ from idpyoidc.message import Message
 from idpyoidc.message.oauth2 import TokenErrorResponse
 from idpyoidc.metadata import get_signing_algs
 from idpyoidc.server.client_authn import BearerHeader
+from idpyoidc.server.util import CURRENT_ISSUER
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,17 @@ def _strip_query(url: str) -> str:
     return str(url).split("?", 1)[0].split("#", 1)[0]
 
 
+def _under_current_issuer(urls) -> list:
+    """The ``urls`` under the issuer the request is answered as
+    (:data:`idpyoidc.server.util.CURRENT_ISSUER`), or all of them when none is set:
+    a proof for another issuer of the same server is refused (RFC 9449 section 4.3)."""
+    _issuer = CURRENT_ISSUER.get()
+    if not _issuer:
+        return list(urls)
+    _prefix = f"{_issuer.rstrip('/')}/"
+    return [u for u in urls if _strip_query(u).startswith(_prefix)]
+
+
 def _check_iat(dpop, now=None):
     _iat = dpop.get("iat")
     now = time.time() if now is None else now
@@ -230,7 +242,7 @@ def token_post_parse_request(request, client_id, context, **kwargs):
 
     Expects ``http_info`` (headers, method, URL) in kwargs. The proof's ``htu``
     must be one of the configured ``allowed_htu`` (the public token endpoint
-    URLs), or the request URL when none are configured.
+    URLs) under the current issuer, or the request URL when none are configured.
 
     :return: the request, or a DPoPErrorResponse (invalid_dpop_proof)
     """
@@ -243,7 +255,8 @@ def token_post_parse_request(request, client_id, context, **kwargs):
     if not _header:
         return request
 
-    allowed_htu = _dpop_conf(context).get("allowed_htu") or kwargs.get("allowed_htu") or [_http_info.get("url", "")]
+    allowed_htu = _dpop_conf(context).get("allowed_htu") or kwargs.get("allowed_htu")
+    allowed_htu = _under_current_issuer(allowed_htu) if allowed_htu else [_http_info.get("url", "")]
     try:
         _, _jkt = verify_proof(_header, _http_info.get("method"), allowed_htu, context)
     except InvalidDPoPProof as err:
@@ -261,8 +274,8 @@ def par_post_parse_request(request, client_id, context, **kwargs):
     one, and records its key thumbprint as ``dpop_jkt`` (RFC 9449 section
     10.1): the code can then only be redeemed with a proof by that key.
 
-    The proof's ``htu`` must be one of the configured ``par_allowed_htu``, or
-    the request URL when none are configured.
+    The proof's ``htu`` must be one of the configured ``par_allowed_htu`` under
+    the current issuer, or the request URL when none are configured.
 
     :return: the request, or a DPoPErrorResponse (invalid_dpop_proof)
     """
@@ -275,7 +288,8 @@ def par_post_parse_request(request, client_id, context, **kwargs):
     if not _header:
         return request
 
-    allowed_htu = _dpop_conf(context).get("par_allowed_htu") or [_http_info.get("url", "")]
+    allowed_htu = _dpop_conf(context).get("par_allowed_htu")
+    allowed_htu = _under_current_issuer(allowed_htu) if allowed_htu else [_http_info.get("url", "")]
     try:
         _, _jkt = verify_proof(_header, _http_info.get("method"), allowed_htu, context)
     except InvalidDPoPProof as err:

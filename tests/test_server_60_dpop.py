@@ -332,6 +332,35 @@ class TestEndpoint(object):
         assert "dpop_jkt" in self._parse(fresh_proof(htu="https://public.example.com/token?x=1"), url=internal)
         self._refused(self._parse(fresh_proof(htu=internal), url=internal), "htu")
 
+    def test_allowed_htu_of_another_issuer_is_refused(self):
+        """One server, several issuers (CURRENT_ISSUER): only the current issuer's URLs count."""
+        from idpyoidc.server.util import CURRENT_ISSUER
+
+        self.context.add_on["dpop"]["allowed_htu"] = ["https://as.example/fe1/token", "https://as.example/fe2/token"]
+        marker = CURRENT_ISSUER.set("https://as.example/fe1")
+        try:
+            assert "dpop_jkt" in self._parse(fresh_proof(htu="https://as.example/fe1/token"))
+            self._refused(self._parse(fresh_proof(htu="https://as.example/fe2/token")), "htu")
+        finally:
+            CURRENT_ISSUER.reset(marker)
+        assert "dpop_jkt" in self._parse(fresh_proof(htu="https://as.example/fe2/token"))
+
+    def test_par_allowed_htu_of_another_issuer_is_refused(self):
+        from idpyoidc.server.util import CURRENT_ISSUER
+
+        self.context.add_on["dpop"]["par_allowed_htu"] = [
+            "https://as.example/fe1/pushed_authorization",
+            "https://as.example/fe2/pushed_authorization",
+        ]
+        marker = CURRENT_ISSUER.set("https://as.example/fe1")
+        try:
+            proof = fresh_proof(htu="https://as.example/fe1/pushed_authorization")
+            assert "dpop_jkt" in self._par(AUTH_REQ.copy(), {"dpop": proof})
+            proof = fresh_proof(htu="https://as.example/fe2/pushed_authorization")
+            self._refused(self._par(AUTH_REQ.copy(), {"dpop": proof}), "htu")
+        finally:
+            CURRENT_ISSUER.reset(marker)
+
     def test_not_a_jws_is_refused(self):
         self._refused(self._parse("not-a-jwt"), "")
 
