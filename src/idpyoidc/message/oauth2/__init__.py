@@ -481,6 +481,9 @@ class TokenIntrospectionResponse(Message):
         "aud": OPTIONAL_LIST_OF_STRINGS,
         "iss": SINGLE_OPTIONAL_STRING,
         "jti": SINGLE_OPTIONAL_STRING,
+        # Confirmation of a sender-constrained token (RFC 7800, RFC 9449 section
+        # 6.2): a JSON object in the response, not a JSON string.
+        "cnf": (dict, False, None, None, False),
     }
 
 

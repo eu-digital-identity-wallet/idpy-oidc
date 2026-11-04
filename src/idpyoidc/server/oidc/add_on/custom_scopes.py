@@ -14,7 +14,7 @@ def add_custom_scopes(endpoint, **kwargs):
         "The custom_scopes add on is deprecated. The `scopes_to_claims` config "
         "option should be used instead."
     )
-    _endpoint = list(endpoint.values())[0]
+    _endpoint = next(iter(endpoint.values()))
 
     _scopes2claims = SCOPE2CLAIMS.copy()
     _scopes2claims.update(kwargs)

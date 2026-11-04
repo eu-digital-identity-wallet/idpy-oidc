@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import Optional
 from typing import Union
 
@@ -10,6 +11,17 @@ from idpyoidc.server.session.token import SessionToken
 from idpyoidc.time_util import utc_time_sans_frac
 
 logger = logging.getLogger(__name__)
+
+#: Striped locks: one redemption of a given code at a time. Checking that the
+#: code is unused, minting and marking it used must not interleave, or
+#: concurrent requests with one code all get tokens. Sessions live in this
+#: process's memory, so this covers a single server process.
+_REDEMPTION_LOCKS = tuple(threading.Lock() for _ in range(64))
+
+
+def redemption_lock(value) -> threading.Lock:
+    """The lock serialising requests that redeem ``value`` (a code)."""
+    return _REDEMPTION_LOCKS[hash(str(value)) % len(_REDEMPTION_LOCKS)]
 
 
 class TokenEndpointHelper(object):

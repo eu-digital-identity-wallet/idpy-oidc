@@ -405,7 +405,7 @@ class TestEndpoint:
         _resp = self.token_endpoint.process_request(request=_req)
 
         assert _resp.to_dict() == {
-            "error": "invalid_request",
+            "error": "invalid_scope",
             "error_description": "Invalid refresh scopes",
         }
 

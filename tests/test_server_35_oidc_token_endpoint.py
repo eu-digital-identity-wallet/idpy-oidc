@@ -317,6 +317,48 @@ class TestEndpoint(_TestEndpoint):
         _2nd_response = self.token_endpoint.parse_request(_token_request)
         assert "error" in _2nd_response
 
+    # NISCY fork: a code is redeemed once even when requests overlap.
+
+    def test_code_parsed_twice_is_redeemed_once(self):
+        session_id = self._create_session(AUTH_REQ)
+        grant = self.session_manager[session_id]
+        code = self._mint_code(grant, AUTH_REQ["client_id"])
+        _token_request = {**TOKEN_REQ_DICT, "code": code.value}
+
+        # Both pass parsing (the code is still unused), as concurrent requests do.
+        first = self.token_endpoint.parse_request(_token_request)
+        second = self.token_endpoint.parse_request(_token_request)
+        assert "access_token" in self.token_endpoint.process_request(request=first)["response_args"]
+
+        # An error is returned as such, a success inside "response_args".
+        _resp = self.token_endpoint.process_request(request=second)
+        assert _resp["error"] == "invalid_grant"
+
+    def test_concurrent_redemptions_mint_one_token(self):
+        import threading
+
+        session_id = self._create_session(AUTH_REQ)
+        grant = self.session_manager[session_id]
+        code = self._mint_code(grant, AUTH_REQ["client_id"])
+        _token_request = {**TOKEN_REQ_DICT, "code": code.value}
+        requests = [self.token_endpoint.parse_request(_token_request) for _ in range(8)]
+        barrier = threading.Barrier(len(requests))
+        results = []
+
+        def redeem(req):
+            barrier.wait()
+            _resp = self.token_endpoint.process_request(request=req)
+            results.append(_resp.get("response_args", _resp))
+
+        threads = [threading.Thread(target=redeem, args=(r,)) for r in requests]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert sum("access_token" in r for r in results) == 1
+        assert sum(r.get("error") == "invalid_grant" for r in results) == len(requests) - 1
+
     def test_do_response(self):
         session_id = self._create_session(AUTH_REQ)
         grant = self.session_manager[session_id]
@@ -466,6 +508,74 @@ class TestEndpoint(_TestEndpoint):
             "error_description": "Invalid refresh token",
         }
 
+    # RFC 6749 section 5.2: a refresh token that is expired, revoked or already
+    # used is an invalid grant. Wallets (OpenID4VCI re-issuance) rely on that
+    # code to fall back to a new authorization.
+    def _refresh_token_for_tests(self):
+        areq = AUTH_REQ.copy()
+        areq["scope"] = ["openid", "offline_access"]
+        session_id = self._create_session(areq)
+        grant = self.context.authz(session_id, areq)
+        code = self._mint_code(grant, areq["client_id"])
+        _token_request = TOKEN_REQ_DICT.copy()
+        _token_request["code"] = code.value
+        _req = self.token_endpoint.parse_request(_token_request)
+        _resp = self.token_endpoint.process_request(request=_req, issue_refresh=True)
+        _value = _resp["response_args"]["refresh_token"]
+        _token = grant.get_token(_value)
+        _token.usage_rules["supports_minting"] = ["access_token", "refresh_token"]
+        return session_id, grant, _value
+
+    def _parse_refresh(self, refresh_token):
+        _request = REFRESH_TOKEN_REQ.copy()
+        _request["refresh_token"] = refresh_token
+        return self.token_endpoint.parse_request(_request.to_urlencoded())
+
+    def test_refresh_token_expired_is_invalid_grant(self, monkeypatch):
+        _, _, _value = self._refresh_token_for_tests()
+        # The JWT exp has passed: the token handler raises ToOld.
+        monkeypatch.setattr("idpyoidc.server.token.jwt_token.is_expired", lambda *a, **k: True)
+        _req = self._parse_refresh(_value)
+        assert isinstance(_req, TokenErrorResponse)
+        assert _req["error"] == "invalid_grant"
+
+    def test_refresh_token_inactive_is_invalid_grant(self):
+        _, grant, _value = self._refresh_token_for_tests()
+        grant.get_token(_value).expires_at = utc_time_sans_frac() - 10
+        _req = self._parse_refresh(_value)
+        assert _req.to_dict() == {
+            "error": "invalid_grant",
+            "error_description": "Refresh token inactive",
+        }
+
+    def test_refresh_token_revoked_is_invalid_grant(self):
+        session_id, _, _value = self._refresh_token_for_tests()
+        self.context.session_manager.revoke_token(session_id, _value)
+        _req = self._parse_refresh(_value)
+        assert _req["error"] == "invalid_grant"
+
+    def test_refresh_token_reused_after_rotation_is_invalid_grant(self):
+        _, _, _value = self._refresh_token_for_tests()
+        self.token_endpoint.revoke_refresh_on_issue = True
+        _req = self._parse_refresh(_value)
+        _resp = self.token_endpoint.process_request(request=_req, issue_refresh=True)
+        assert "access_token" in _resp["response_args"]
+        _req = self._parse_refresh(_value)
+        assert _req["error"] == "invalid_grant"
+
+    def test_access_token_as_refresh_token_is_invalid_grant(self):
+        _areq = AUTH_REQ.copy()
+        _areq["scope"] = ["openid", "offline_access"]
+        session_id = self._create_session(_areq)
+        grant = self.context.authz(session_id, _areq)
+        code = self._mint_code(grant, _areq["client_id"])
+        _token_request = TOKEN_REQ_DICT.copy()
+        _token_request["code"] = code.value
+        _req = self.token_endpoint.parse_request(_token_request)
+        _resp = self.token_endpoint.process_request(request=_req, issue_refresh=True)
+        _req = self._parse_refresh(_resp["response_args"]["access_token"])
+        assert _req["error"] == "invalid_grant"
+
     def test_refresh_scopes(self):
         areq = AUTH_REQ.copy()
         areq["scope"] = ["openid", "offline_access", "profile"]
@@ -555,7 +665,7 @@ class TestEndpoint(_TestEndpoint):
         _resp = self.token_endpoint.process_request(request=_req)
 
         assert _resp.to_dict() == {
-            "error": "invalid_request",
+            "error": "invalid_scope",
             "error_description": "Invalid refresh scopes",
         }
 

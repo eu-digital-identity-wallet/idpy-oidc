@@ -98,26 +98,36 @@ class Token(Endpoint):
         self, request: Union[Message, dict], client_id: Optional[str] = ""
     ) -> Optional[Union[Message, TokenEndpointHelper]]:
         grant_type = request.get("grant_type")
-        if grant_type:
-            _client_id = client_id or request.get("client_id")
-            if client_id:
-                client = self.upstream_get("context").cdb[client_id]
-                _grant_types_supported = client.get(
-                    "grant_types_supported",
-                    self.upstream_get("context").claims.get_claim("grant_types_supported", []),
-                )
-                if grant_type not in _grant_types_supported:
-                    return self.error_cls(
-                        error="invalid_request",
-                        error_description=f"Unsupported grant_type: {grant_type}",
-                    )
-
-            return self.grant_type_helper.get(grant_type)
-        else:
+        if not grant_type:
             return self.error_cls(
                 error="invalid_request",
-                error_description=f"Do not know how to handle this type of request",
+                error_description="Missing grant_type",
             )
+
+        # RFC 6749 section 5.2: a grant type the server does not support is
+        # unsupported_grant_type, one this client may not use is unauthorized_client.
+        _context = self.upstream_get("context")
+        _client = _context.cdb.get(client_id, {}) if client_id else {}
+        if "grant_types_supported" in _client:
+            if grant_type not in _client["grant_types_supported"]:
+                return self.error_cls(
+                    error="unauthorized_client",
+                    error_description=f"grant_type not allowed for this client: {grant_type}",
+                )
+        elif client_id:
+            if grant_type not in _context.claims.get_claim("grant_types_supported", []):
+                return self.error_cls(
+                    error="unsupported_grant_type",
+                    error_description=f"Unsupported grant_type: {grant_type}",
+                )
+
+        _helper = self.grant_type_helper.get(grant_type)
+        if _helper is None:
+            return self.error_cls(
+                error="unsupported_grant_type",
+                error_description=f"Unsupported grant_type: {grant_type}",
+            )
+        return _helper
 
     def _post_parse_request(
         self, request: Union[Message, dict], client_id: Optional[str] = "", **kwargs
@@ -125,13 +135,7 @@ class Token(Endpoint):
         _resp = self._get_helper(request, client_id)
         if isinstance(_resp, TokenEndpointHelper):
             return _resp.post_parse_request(request, client_id, **kwargs)
-        elif _resp:
-            return _resp
-        else:
-            return self.error_cls(
-                error="invalid_request",
-                error_description=f"Do not know how to handle this type of request",
-            )
+        return _resp
 
     def process_request(self, request: Optional[Union[Message, dict]] = None, **kwargs):
         """
@@ -140,7 +144,8 @@ class Token(Endpoint):
         :param kwargs:
         :return: Dictionary with response information
         """
-        if isinstance(request, self.error_cls):
+        # Any error from parsing (also those of add-ons, e.g. DPoP) is the answer.
+        if isinstance(request, ResponseMessage) and "error" in request:
             return request
 
         if request is None:
@@ -148,13 +153,9 @@ class Token(Endpoint):
 
         try:
             _helper = self._get_helper(request)
-            if _helper:
-                response_args = _helper.process_request(request, **kwargs)
-            else:
-                return self.error_cls(
-                    error="invalid_request",
-                    error_description=f"Unsupported grant_type: {request['grant_type']}",
-                )
+            if not isinstance(_helper, TokenEndpointHelper):
+                return _helper
+            response_args = _helper.process_request(request, **kwargs)
         except JWEException as err:
             return self.error_cls(error="invalid_request", error_description="%s" % err)
         except MintingNotAllowed as err:

@@ -2,10 +2,16 @@ import logging
 from typing import Optional
 from typing import Union
 
+from cryptojwt import BadSyntax
+
+from idpyoidc.exception import MissingRequiredAttribute
+from idpyoidc.exception import MissingRequiredValue
 from idpyoidc.message import Message
 from idpyoidc.message.oidc import RefreshAccessTokenRequest
+from idpyoidc.server.exception import ToOld
 from idpyoidc.server.session.token import RefreshToken
 from idpyoidc.server.token.exception import UnknownToken
+from idpyoidc.server.token.exception import WrongTokenClass
 from idpyoidc.time_util import utc_time_sans_frac
 
 from . import TokenEndpointHelper
@@ -34,6 +40,16 @@ class RefreshTokenHelper(TokenEndpointHelper):
             return self.error_cls(error="invalid_grant", error_description="Wrong client")
 
         _grant = _session_info["grant"]
+
+        # A grant bound to a DPoP key (RFC 9449 section 5) is refreshed only with
+        # a proof from that key; it can not be re-bound or downgraded to Bearer.
+        _bound_jkt = _grant.extra.get("dpop_jkt")
+        if _bound_jkt and req.get("dpop_jkt") != _bound_jkt:
+            from idpyoidc.server.oauth2.add_on.dpop import DPoPErrorResponse
+
+            return DPoPErrorResponse(
+                error="invalid_dpop_proof", error_description="DPoP key differs from the bound key"
+            )
 
         token_type = "Bearer"
 
@@ -111,28 +127,33 @@ class RefreshTokenHelper(TokenEndpointHelper):
         request = RefreshAccessTokenRequest(**request.to_dict())
         _context = self.endpoint.upstream_get("context")
 
-        request.verify(
-            keyjar=self.endpoint.upstream_get("sttribute", "keyjar"), opponent_id=client_id
-        )
+        try:
+            request.verify(
+                keyjar=self.endpoint.upstream_get("attribute", "keyjar"), opponent_id=client_id
+            )
+        except (MissingRequiredAttribute, MissingRequiredValue, ValueError) as err:
+            # RFC 6749 section 5.2: e.g. no refresh_token parameter
+            return self.error_cls(error="invalid_request", error_description=f"{err}")
 
         _mngr = _context.session_manager
         try:
             _session_info = _mngr.get_session_info_by_token(
                 request["refresh_token"], grant=True, handler_key="refresh_token"
             )
-        except (KeyError, UnknownToken):
+        except (KeyError, UnknownToken, BadSyntax, ToOld, WrongTokenClass):
             logger.error("Refresh token invalid")
             return self.error_cls(error="invalid_grant", error_description="Invalid refresh token")
 
         grant = _session_info["grant"]
         token = grant.get_token(request["refresh_token"])
 
+        # RFC 6749 section 5.2: an unusable refresh token is invalid_grant, not invalid_request
         if not isinstance(token, RefreshToken):
-            return self.error_cls(error="invalid_request", error_description="Wrong token type")
+            return self.error_cls(error="invalid_grant", error_description="Wrong token type")
 
         if token.is_active() is False:
             return self.error_cls(
-                error="invalid_request", error_description="Refresh token inactive"
+                error="invalid_grant", error_description="Refresh token inactive"
             )
 
         if "scope" in request:
@@ -140,7 +161,7 @@ class RefreshTokenHelper(TokenEndpointHelper):
             scopes = set(grant.find_scope(token.based_on))
             if not req_scopes.issubset(scopes):
                 return self.error_cls(
-                    error="invalid_request",
+                    error="invalid_scope",
                     error_description="Invalid refresh scopes",
                 )
 

@@ -1139,7 +1139,7 @@ class JRD(ResponseMessage):
 
 class WebFingerRequest(Message):
     c_param = {"resource": SINGLE_REQUIRED_STRING, "rel": SINGLE_REQUIRED_STRING}
-    c_default = {"rel": "http://openid.net/specs/connect/1.0/issuer"}
+    c_default = {"rel": "http://openid.net/specs/connect/1.0/issuer"}  # NOSONAR - identifier defined by the spec, compared as a string, never fetched
 
 
 class ResourceRequest(Message):

@@ -6,6 +6,7 @@ from typing import Optional
 from idpyoidc.message import oauth2
 from idpyoidc.server.endpoint import Endpoint
 from idpyoidc.server.exception import ToOld
+from idpyoidc.server.util import current_issuer
 from idpyoidc.server.token.exception import UnknownToken
 from idpyoidc.server.token.exception import WrongTokenClass
 
@@ -64,7 +65,7 @@ class Introspection(Endpoint):
             "exp": token.expires_at,
             "iat": token.issued_at,
             "sub": grant.sub,
-            "iss": _context.issuer,
+            "iss": current_issuer(_context),
         }
 
         try:
@@ -77,6 +78,12 @@ class Introspection(Endpoint):
 
         if aud:
             ret["aud"] = aud
+
+        # RFC 9449 section 6.2: the resource server checks the proof key of a
+        # DPoP-bound access token against cnf.jkt.
+        _jkt = grant.extra.get("dpop_jkt")
+        if _jkt and token.token_class == "access_token":
+            ret["cnf"] = {"jkt": _jkt}
 
         token_args = {}
         for meth in _context.token_args_methods:

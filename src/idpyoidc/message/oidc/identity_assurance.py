@@ -64,7 +64,7 @@ def to_iso8601_2004(val=0, format=TIME_FORMAT):
     """
 
     # Finds the local time zone
-    ltz = datetime.datetime.utcnow().astimezone().tzinfo
+    ltz = datetime.datetime.now().astimezone().tzinfo
 
     if val:
         if isinstance(val, datetime.datetime):

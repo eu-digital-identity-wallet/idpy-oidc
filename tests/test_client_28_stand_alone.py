@@ -65,6 +65,17 @@ class TestStandAloneClientOIDCStatic(object):
         self.client.do_client_registration()
         assert self.client.context.get_usage("client_id") == STATIC_CONFIG["client_id"]
 
+    def test_redirect_uri_errors_propagate(self, monkeypatch):
+        """NISCY fork: the except clause was a list, so these errors became a TypeError."""
+        from idpyoidc.client.oauth2 import stand_alone_client
+
+        def fail(*args, **kwargs):
+            raise ValueError("no redirect_uri")
+
+        monkeypatch.setattr(stand_alone_client, "pick_redirect_uri", fail)
+        with pytest.raises(ValueError, match="no redirect_uri"):
+            self.client.init_authorization()
+
     def test_init_authorization(self):
         self.client.do_provider_info()
         self.client.do_client_registration()

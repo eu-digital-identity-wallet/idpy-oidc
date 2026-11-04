@@ -3,7 +3,7 @@ from idpyoidc.message.oidc import JRD
 from idpyoidc.message.oidc import Link
 from idpyoidc.server.endpoint import Endpoint
 
-OIC_ISSUER = "http://openid.net/specs/connect/1.0/issuer"
+OIC_ISSUER = "http://openid.net/specs/connect/1.0/issuer"  # NOSONAR - identifier defined by the spec, compared as a string, never fetched
 
 
 class Discovery(Endpoint):

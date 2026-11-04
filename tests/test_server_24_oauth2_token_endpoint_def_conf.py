@@ -174,8 +174,8 @@ class TestEndpoint(object):
 
         assert isinstance(_req, TokenErrorResponse)
         assert _req.to_dict() == {
-            "error": "invalid_request",
-            "error_description": "Unsupported grant_type: authorization_code",
+            "error": "unauthorized_client",
+            "error_description": "grant_type not allowed for this client: authorization_code",
         }
 
     def test_process_request(self):
@@ -527,7 +527,7 @@ class TestEndpoint(object):
         _resp = self.token_endpoint.process_request(request=_req, issue_refresh=True)
 
         assert _resp.to_dict() == {
-            "error": "invalid_request",
+            "error": "invalid_scope",
             "error_description": "Invalid refresh scopes",
         }
 

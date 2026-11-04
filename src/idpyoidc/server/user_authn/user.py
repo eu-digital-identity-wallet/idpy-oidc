@@ -37,7 +37,7 @@ LOC = {
     "se": {
         "title": "Logga in",
         "login_title": "Användarnamn",
-        "passwd_title": "Lösenord",
+        "passwd_title": "Lösenord",  # NOSONAR - translated form label, not a credential
         "submit_text": "Sänd",
         "client_policy_title": "Klientens sekretesspolicy",
     },
@@ -143,14 +143,26 @@ class UserAuthnMethod(object):
         return {}
 
 
-def create_signed_jwt(issuer, keyjar, sign_alg="RS256", **kwargs):
-    signer = JWT(keyjar, iss=issuer, sign_alg=sign_alg)
+def create_signed_jwt(issuer, keyjar, sign_alg="RS256", lifetime=0, **kwargs):
+    signer = JWT(keyjar, iss=issuer, sign_alg=sign_alg, lifetime=lifetime)
     return signer.pack(payload=kwargs)
 
 
-def verify_signed_jwt(token, keyjar, allowed_sign_algs=None):
+def verify_signed_jwt(token, keyjar, allowed_sign_algs=None, issuer=None, require_exp=False):
+    """Verifies a JWT signed by this server.
+
+    :param issuer: when given, the token must name it as ``iss``; the keyjar
+        holds other parties' keys too, so without it a token signed by any of
+        them would verify.
+    :param require_exp: reject a token without ``exp`` (it would never expire).
+    """
     verifier = JWT(keyjar, allowed_sign_algs=allowed_sign_algs)
-    return verifier.unpack(token)
+    payload = verifier.unpack(token)
+    if issuer is not None and payload.get("iss") != issuer:
+        raise ValueError("Token not issued by this server")
+    if require_exp and "exp" not in payload:
+        raise ValueError("Token without exp")
+    return payload
 
 
 LABELS = {"tos_uri": "Terms of Service", "policy_uri": "Service policy", "logo_uri": ""}
@@ -477,10 +489,14 @@ class PidIssuerAuth(object):
 class EudiwIssuer(object):
     url_endpoint = "/verify"
     FAILED_AUTHN = (None, True)
+    #: Seconds the user has to finish at the issuer backend.
+    DEFAULT_TOKEN_LIFETIME = 1800
 
-    def __init__(self, upstream_get=None, **kwargs):
+    def __init__(self, upstream_get=None, token_lifetime=None, sign_alg="RS256", **kwargs):
         self.query_param = "upm_answer"
         self.upstream_get = upstream_get
+        self.token_lifetime = int(token_lifetime or self.DEFAULT_TOKEN_LIFETIME)
+        self.sign_alg = sign_alg
         self.kwargs = kwargs
 
     def __call__(self, **kwargs):
@@ -498,7 +514,13 @@ class EudiwIssuer(object):
         _keyjar = self.upstream_get("attribute", "keyjar")
         # Stores information need afterwards in a signed JWT that then
         # appears as a hidden input in the form
-        jws = create_signed_jwt(_context.issuer, _keyjar, **kwargs)
+        jws = create_signed_jwt(
+            _context.issuer,
+            _keyjar,
+            sign_alg=self.sign_alg,
+            lifetime=self.token_lifetime,
+            **kwargs,
+        )
         _kwargs = self.kwargs.copy()
         for attr in ["policy", "tos", "logo"]:
             _uri = "{}_uri".format(attr)
@@ -512,7 +534,6 @@ class EudiwIssuer(object):
 
         url = kwargs["query"]
         query_params = parse_qs(url)
-        print("\nquery_params: ", query_params)
 
         """ args = {}
         if "authorization_details" in query_params:
@@ -536,8 +557,6 @@ class EudiwIssuer(object):
             "token": jws,
         }
         _resp.update(args) """
-
-        print("\nuser.py jws: ", jws)
 
         response = {"jws": jws}
 
@@ -610,7 +629,14 @@ class EudiwIssuer(object):
         return {}
 
     def unpack_token(self, token):
-        return verify_signed_jwt(token=token, keyjar=self.upstream_get("context").keyjar)
+        _context = self.upstream_get("context")
+        return verify_signed_jwt(
+            token=token,
+            keyjar=_context.keyjar,
+            allowed_sign_algs=[self.sign_alg],
+            issuer=_context.issuer,
+            require_exp=True,
+        )
 
 
 def factory(cls, **kwargs):

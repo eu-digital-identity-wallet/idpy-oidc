@@ -16,7 +16,7 @@ from idpyoidc.message.oidc import RegistrationRequest
 from idpyoidc.node import Node
 from idpyoidc.server.client_authn import verify_client
 from idpyoidc.server.exception import UnAuthorizedClient
-from idpyoidc.server.util import OAUTH2_NOCACHE_HEADERS
+from idpyoidc.server.util import OAUTH2_NOCACHE_HEADERS, current_issuer, endpoint_url
 from idpyoidc.util import sanitize
 
 __author__ = "Roland Hedberg"
@@ -226,20 +226,17 @@ class Endpoint(Node):
             if allowed_htu is not None:
                 kwargs["allowed_htu"] = allowed_htu
 
-        if "trusted_attesters_path" in conf["endpoint"]["token"]["kwargs"]:
-            kwargs["trusted_attesters_path"] = conf["endpoint"]["token"]["kwargs"][
-                "trusted_attesters_path"
-            ]
-
-        if "trust_validator_url" in conf["endpoint"]["token"]["kwargs"]:
-            kwargs["trust_validator_url"] = conf["endpoint"]["token"]["kwargs"][
-                "trust_validator_url"
-            ]
-
-        if "status_validator_url" in conf["endpoint"]["token"]["kwargs"]:
-            kwargs["status_validator_url"] = conf["endpoint"]["token"]["kwargs"][
-                "status_validator_url"
-            ]
+        # Wallet attestation (client authentication) settings, configured on the token endpoint
+        _token_kwargs = conf.get("endpoint", {}).get("token", {}).get("kwargs") or {}
+        for _name in (
+            "trusted_attesters_path",
+            "trust_validator_url",
+            "status_validator_url",
+            "status_validation_context",
+            "pop_allowed_aud",
+        ):
+            if _name in _token_kwargs:
+                kwargs[_name] = _token_kwargs[_name]
 
         if http_info is None:
             http_info = {}
@@ -530,9 +527,9 @@ class Endpoint(Node):
         _context = self.upstream_get("context")
         for t in self.allowed_targets:
             if t == "":
-                res.append(_context.issuer)
+                res.append(current_issuer(_context))
             else:
-                res.append(self.upstream_get("endpoint", t).full_path)
+                res.append(endpoint_url(self.upstream_get("endpoint", t)))
         return set(res)
 
     def supports(self):

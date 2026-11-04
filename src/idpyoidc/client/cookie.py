@@ -68,11 +68,11 @@ def cookie_signature(key, *parts):
     :returns: hexdigest of the HMAC
     """
 
-    sha1 = hmac.new(as_bytes(key), digestmod=hashlib.sha1)
+    mac = hmac.new(as_bytes(key), digestmod=hashlib.sha256)
     for part in parts:
         if part:
-            sha1.update(as_bytes(part))
-    return str(sha1.hexdigest())
+            mac.update(as_bytes(part))
+    return str(mac.hexdigest())
 
 
 def verify_cookie_signature(sig, key, *parts):
