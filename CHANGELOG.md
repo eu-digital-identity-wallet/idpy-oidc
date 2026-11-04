@@ -41,6 +41,7 @@
 - Client cookie MAC is HMAC-SHA256 (was SHA1; older cookies are refused); generated client secrets use HMAC-SHA256.
 - CI: `tests.yml` (Python 3.12/3.13) replaces `python-app.yml`; Gitleaks, Dependency-Check and SonarCloud added.
 - `tests/conftest.py` marks upstream tests broken by intentional fork changes as strict xfails.
+- Removed the unused `private/` modules, and test-generated keys (`private/*.json`) and request objects (`requests/`) from the repository root.
 
 ### Fixed
 - DPoP add-on (RFC 9449): proofs are fully checked (signature, `typ`, `htm`, `htu` against `allowed_htu`, `iat`, base64url `ath`, single-use `jti`); errors are `invalid_dpop_proof`; refreshes need the same key; `/introspection` returns `cnf.jkt`.
