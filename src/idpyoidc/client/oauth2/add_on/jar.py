@@ -213,12 +213,12 @@ def add_support(
                     args["request_object_encryption_enc"] = request_object_encryption_enc
                     args["request_object_encryption_alg"] = request_object_encryption_alg
                 else:
-                    AttributeError(
+                    raise AttributeError(
                         f"An encryption alg {request_object_encryption_alg} there is no support "
                         f"for"
                     )
             else:
-                AttributeError(
+                raise AttributeError(
                     f"An encryption enc {request_object_encryption_enc} there is no support for"
                 )
 

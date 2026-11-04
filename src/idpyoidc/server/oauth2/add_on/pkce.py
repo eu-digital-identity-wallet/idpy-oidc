@@ -38,14 +38,17 @@ def post_authn_parse(request, client_id, context, **kwargs):
     :param request:
     :param client_id:
     :param context:
-    :param kwargs:
+    :param kwargs: ``pre_authorized_code=True`` is set by the server itself for
+        its internal pre-authorized code request, which has no PKCE
     :return:
     """
     client = context.cdb[client_id]
-    if "pkce_essential" in client:
-        essential = client["pkce_essential"]
-    else:
-        essential = context.add_on["pkce"].get("essential", False)
+    # A client setting can only make PKCE stricter, never switch it off.
+    essential = bool(context.add_on["pkce"].get("essential", False)) or bool(
+        client.get("pkce_essential", False)
+    )
+    if kwargs.get("pre_authorized_code"):
+        essential = False
     if essential and "code_challenge" not in request:
         return AuthorizationErrorResponse(
             error="invalid_request",
@@ -137,6 +140,9 @@ def add_support(
     essential: Optional[bool] = False,
     **kwargs
 ):
+    if "code_challenge_method" in kwargs:
+        # A misspelt key used to be ignored silently, allowing every method.
+        raise ValueError("Unknown PKCE option 'code_challenge_method'; use 'code_challenge_methods'")
     authn_endpoint = endpoint.get("authorization")
     if authn_endpoint is None:
         LOGGER.warning("No authorization endpoint found, skipping PKCE configuration")
@@ -149,10 +155,19 @@ def add_support(
 
     authn_endpoint.post_parse_request.append(post_authn_parse)
     token_endpoint.post_parse_request.append(post_token_parse)
+    # Pushed requests are checked when they are pushed, not only when used.
+    par_endpoint = endpoint.get("pushed_authorization")
+    if par_endpoint is not None:
+        par_endpoint.post_parse_request.append(post_authn_parse)
 
     if code_challenge_methods is None:
         code_challenge_methods = CC_METHOD
     else:
+        # JSON configuration can only give the method names.
+        if isinstance(code_challenge_methods, str):
+            code_challenge_methods = code_challenge_methods.split()
+        if isinstance(code_challenge_methods, (list, tuple)):
+            code_challenge_methods = {m: CC_METHOD.get(m) for m in code_challenge_methods}
         for method in code_challenge_methods:
             if method not in CC_METHOD:
                 raise ValueError("Unsupported method: {}".format(method))

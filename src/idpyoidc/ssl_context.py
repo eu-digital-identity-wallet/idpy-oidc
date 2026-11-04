@@ -43,7 +43,10 @@ def create_context(dir_path, config, **kwargs):  # pragma: no cover
         if _ca_bundle:
             context.load_verify_locations(_ca_bundle)
     else:
-        context.verify_mode = ssl.CERT_NONE
+        # A server context: verify_mode is about client certificates (mutual
+        # TLS). CERT_NONE means none are requested; the server's own
+        # certificate is unaffected.
+        context.verify_mode = ssl.CERT_NONE  # NOSONAR - server side, client certificates not requested
 
     try:
         context.load_cert_chain(_cert_file, _key_file)

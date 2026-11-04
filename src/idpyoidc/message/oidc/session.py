@@ -108,7 +108,7 @@ class LogoutToken(Message):
         _keys = list(self["events"].keys())
         if len(_keys) != 1:
             raise ValueError('Must only be one member in "events"')
-        if _keys[0] != "http://schemas.openid.net/event/backchannel-logout":
+        if _keys[0] != "http://schemas.openid.net/event/backchannel-logout":  # NOSONAR - identifier defined by the spec, compared as a string, never fetched
             raise ValueError('Wrong member in "events"')
         if self["events"][_keys[0]] != {}:
             raise ValueError('Wrong member value in "events"')
@@ -149,7 +149,7 @@ class LogoutToken(Message):
         return True
 
 
-BACK_CHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"
+BACK_CHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"  # NOSONAR - identifier defined by the spec, compared as a string, never fetched
 
 
 class BackChannelLogoutRequest(Message):

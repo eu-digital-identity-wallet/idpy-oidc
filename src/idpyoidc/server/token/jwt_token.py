@@ -1,3 +1,4 @@
+import logging
 from typing import Callable, Optional, Union
 
 from cryptojwt import JWT
@@ -5,12 +6,15 @@ from cryptojwt.jws.exception import JWSException
 from cryptojwt.utils import importer
 
 from idpyoidc.server.exception import ToOld
+from idpyoidc.server.util import CURRENT_ISSUER
 
 from ...message import Message
 from ...message.oauth2 import JWTAccessToken
 from ..constant import DEFAULT_TOKEN_LIFETIME
 from . import Token, is_expired
 from .exception import UnknownToken, WrongTokenClass
+
+logger = logging.getLogger(__name__)
 
 
 class JWTToken(Token):
@@ -63,10 +67,16 @@ class JWTToken(Token):
                 session_info = _context.session_manager.get_session_info(payload["sid"])
                 client_id = session_info.get("client_id")
             except Exception:
-                pass
+                logger.debug("No session for the token's sid; the token has no client_id")
 
-        # 2. If we found the client, check if they have a wia_sub saved in the CDB
-        if client_id and self.cdb:
+        # 2. The status of the wallet attestation verified in this request;
+        # the client database entry only for flows without one.
+        from idpyoidc.server.client_authn import VERIFIED_CLIENT_STATUS
+
+        verified_status = VERIFIED_CLIENT_STATUS.get()
+        if verified_status is not None:
+            payload["client_status"] = verified_status
+        elif client_id and self.cdb:
             client_info = self.cdb.get(client_id, {})
             if "client_status" in client_info:
                 payload["client_status"] = client_info["client_status"]
@@ -105,7 +115,7 @@ class JWTToken(Token):
             lifetime = self.lifetime
         signer = JWT(
             key_jar=self.upstream_get("attribute", "keyjar"),
-            iss=self.issuer,
+            iss=CURRENT_ISSUER.get() or self.issuer,
             lifetime=lifetime,
             sign_alg=self.alg,
         )

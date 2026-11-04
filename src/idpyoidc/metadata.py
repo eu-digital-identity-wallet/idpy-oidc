@@ -22,7 +22,7 @@ def metadata_dump(info, exclude_attributes):
 
 
 def metadata_load(item: dict, **kwargs):
-    _class_name = list(item.keys())[0]  # there is only one
+    _class_name = next(iter(item.keys()))  # there is only one
     _cls = importer(_class_name)
     _cls = _cls().load(item[_class_name])
     return _cls

@@ -10,6 +10,7 @@ from idpyoidc.message import Message
 
 from idpyoidc.server.construct import construct_provider_info
 from idpyoidc.server.exception import ToOld
+from idpyoidc.server.util import current_issuer
 from idpyoidc.server.session.claims import claims_match
 
 from . import Token
@@ -264,7 +265,7 @@ class IDToken(Token):
 
         _jwt = JWT(
             self.upstream_get("attribute", "keyjar"),
-            iss=_context.issuer,
+            iss=current_issuer(_context),
             lifetime=lifetime,
             **alg_dict,
         )

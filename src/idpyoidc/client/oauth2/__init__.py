@@ -1,5 +1,4 @@
 import logging
-from json import JSONDecodeError
 from typing import Callable
 from typing import Optional
 from typing import Union
@@ -302,8 +301,6 @@ class Client(Entity):
                         "HTTP ERROR: %s [%s] on %s"
                         % (reqresp.text, reqresp.status_code, reqresp.url)
                     )
-            except JSONDecodeError:  # So it's not JSON assume text then
-                err_resp = {"error": reqresp.text}
 
             err_resp["status_code"] = reqresp.status_code
             return err_resp

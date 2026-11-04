@@ -321,6 +321,18 @@ class TestEndpoint(object):
         assert _query
         assert "code" in _query
 
+    def test_iss_is_the_current_issuer(self):
+        """RFC 9207 iss names the issuer the request is answered as."""
+        from idpyoidc.server.util import CURRENT_ISSUER
+
+        session_id = self._create_session(AUTH_REQ)
+        marker = CURRENT_ISSUER.set("https://example.com/frontend-a")
+        try:
+            _resp = self.endpoint.authz_part2(request=AUTH_REQ, session_id=session_id)
+        finally:
+            CURRENT_ISSUER.reset(marker)
+        assert _resp["response_args"]["iss"] == "https://example.com/frontend-a"
+
     def test_do_response_code_token(self):
         """UnAuthorized Client"""
         _orig_req = AUTH_REQ_DICT.copy()
@@ -328,7 +340,8 @@ class TestEndpoint(object):
         msg = ""
         _pr_resp = self.endpoint.parse_request(_orig_req)
         assert isinstance(_pr_resp, AuthorizationErrorResponse)
-        assert _pr_resp["error"] == "invalid_request"
+        # RFC 6749 section 4.1.2.1: the server does not support "code token"
+        assert _pr_resp["error"] == "unsupported_response_type"
 
     def test_verify_uri_unknown_client(self):
         request = {"redirect_uri": "https://rp.example.com/cb"}

@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 #
 
 WF_URL = "https://{}/.well-known/webfinger"
-OIC_ISSUER = "http://openid.net/specs/connect/1.0/issuer"
+OIC_ISSUER = "http://openid.net/specs/connect/1.0/issuer"  # NOSONAR - identifier defined by the spec, compared as a string, never fetched
 
 IDT2REG = {
     "sigalg": "id_token_signed_response_alg",

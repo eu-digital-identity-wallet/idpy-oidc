@@ -1,3 +1,6 @@
+# Keeps a draft GitHub release up to date from merged PRs (config: .github/release-drafter.yml).
+# Runs on push to master/develop and on PR open/reopen/synchronize.
+# Needs secrets: none (uses the built-in GITHUB_TOKEN).
 name: Release drafter
 
 on:
@@ -6,12 +9,16 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 
+permissions:
+  contents: write
+  pull-requests: read
+
 jobs:
   update_release_draft:
     name: Update draft release
     runs-on: ubuntu-latest
     steps:
     -
-      uses: release-drafter/release-drafter@v5
+      uses: release-drafter/release-drafter@09c613e259eb8d4e7c81c2cb00618eb5fc4575a7 # v5.25.0
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

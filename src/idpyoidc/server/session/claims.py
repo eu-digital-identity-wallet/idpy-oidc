@@ -120,7 +120,7 @@ class ClaimsInterface:
 
         if _always_add:
             if isinstance(_always_add, list):
-                base_claims.update({k: None for k in _always_add})
+                base_claims.update(dict.fromkeys(_always_add))
             else:
                 base_claims.update(_always_add)
 

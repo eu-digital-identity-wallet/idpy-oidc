@@ -153,7 +153,7 @@ class ImpExp:
 
             val = [_cls(**_args).load(v, **_kwargs) for v in item]
         elif issubclass(cls, Message):
-            _cls_name = list(item.keys())[0]
+            _cls_name = next(iter(item.keys()))
             _cls = importer(_cls_name)
             val = _cls().from_dict(item[_cls_name])
         else:

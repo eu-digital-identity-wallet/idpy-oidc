@@ -1,5 +1,5 @@
 __author__ = "Roland Hedberg"
-__version__ = "4.3.0"
+__version__ = "4.3.0+eudiw.0.2.0"
 
 VERIFIED_CLAIM_PREFIX = "__verified"
 

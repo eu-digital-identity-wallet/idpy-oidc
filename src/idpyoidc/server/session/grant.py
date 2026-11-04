@@ -55,7 +55,7 @@ def find_token(issued, token_id):
 def issued_token_load(items: List[dict], **kwargs):
     res = []
     for item in items:
-        _class_name = list(item.keys())[0]
+        _class_name = next(iter(item.keys()))
         _cls = importer(_class_name)
         _cls = _cls().load(item[_class_name])
         res.append(_cls)
@@ -314,7 +314,7 @@ class Grant(Item):
             usage_rules = self.usage_rules[token_class]
 
         if claims:  # convert list to claims specification dict
-            claims = {x: None for x in claims}
+            claims = dict.fromkeys(claims)
 
         _class = self.token_map.get(token_class)
         if token_class == "id_token":

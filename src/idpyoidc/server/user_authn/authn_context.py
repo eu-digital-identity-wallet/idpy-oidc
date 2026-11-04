@@ -102,7 +102,7 @@ class AuthnBroker(object):
 
     def default(self):
         if len(self.db) >= 1:
-            return list(self.db.values())[0]
+            return next(iter(self.db.values()))
         else:
             return None
 

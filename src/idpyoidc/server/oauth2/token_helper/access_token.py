@@ -8,12 +8,15 @@ from cryptojwt.utils import importer
 from idpyoidc.exception import ImproperlyConfigured
 from idpyoidc.message import Message
 from idpyoidc.message.oauth2 import TokenErrorResponse
+from idpyoidc.server.oauth2.add_on.dpop import authorization_request_jkt_error
 from idpyoidc.util import sanitize
 
 from ...session import MintingNotAllowed
 from ...session.token import AuthorizationCode
 from ...token import UnknownToken
+from ...token.exception import WrongTokenClass
 from . import TokenEndpointHelper
+from . import redemption_lock
 from . import validate_resource_indicators_policy
 
 logger = logging.getLogger(__name__)
@@ -21,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 class AccessTokenHelper(TokenEndpointHelper):
     def process_request(self, req: Union[Message, dict], **kwargs):
+        """Redeems an authorization code, one request per code at a time."""
+        with redemption_lock(req.get("code")):
+            return self._redeem_code(req, **kwargs)
+
+    def _redeem_code(self, req: Union[Message, dict], **kwargs):
         """
 
         :param req:
@@ -75,12 +83,20 @@ class AccessTokenHelper(TokenEndpointHelper):
             _dpop_enabled = False
 
         if _dpop_enabled:
+            # Before the grant is bound to this request's key; the code stays unused.
+            _jkt_error = authorization_request_jkt_error(grant, req)
+            if _jkt_error:
+                return _jkt_error
             _dpop_jkt = req.get("dpop_jkt")
             if _dpop_jkt:
                 grant.extra["dpop_jkt"] = _dpop_jkt
                 token_type = "DPoP"
 
         _based_on = grant.get_token(_access_code)
+        # Checked again under the redemption lock: a concurrent request may
+        # have used the code since post_parse_request.
+        if not _based_on.is_active():
+            return self.error_cls(error="invalid_grant", error_description="Code inactive")
         _supports_minting = _based_on.usage_rules.get("supports_minting", [])
 
         _authn_req = grant.authorization_request
@@ -88,9 +104,15 @@ class AccessTokenHelper(TokenEndpointHelper):
         # If redirect_uri was in the initial authorization request
         # verify that the one given here is the correct one.
         if "redirect_uri" in _authn_req:
+            # RFC 6749 section 4.1.3: then it is required and must be identical;
+            # a mismatch is invalid_grant (section 5.2).
+            if "redirect_uri" not in req:
+                return self.error_cls(
+                    error="invalid_request", error_description="Missing redirect_uri"
+                )
             if req["redirect_uri"] != _authn_req["redirect_uri"]:
                 return self.error_cls(
-                    error="invalid_request", error_description="redirect_uri mismatch"
+                    error="invalid_grant", error_description="redirect_uri mismatch"
                 )
 
         logger.debug("All checks OK")
@@ -192,22 +214,27 @@ class AccessTokenHelper(TokenEndpointHelper):
         :returns:
         """
 
+        # RFC 6749 section 5.2: a missing parameter is invalid_request, a code
+        # that is unknown, expired, used or of the wrong kind is invalid_grant.
+        if not request.get("code"):
+            return self.error_cls(error="invalid_request", error_description="Missing code")
+
         _mngr = self.endpoint.upstream_get("context").session_manager
         try:
             _session_info = _mngr.get_session_info_by_token(
                 request["code"], grant=True, handler_key="authorization_code"
             )
-        except (KeyError, UnknownToken):
+        except (KeyError, UnknownToken, WrongTokenClass):
             logger.error("Access Code invalid")
             return self.error_cls(error="invalid_grant", error_description="Unknown code")
 
         grant = _session_info["grant"]
         code = grant.get_token(request["code"])
         if not isinstance(code, AuthorizationCode):
-            return self.error_cls(error="invalid_request", error_description="Wrong token type")
+            return self.error_cls(error="invalid_grant", error_description="Wrong token type")
 
         if code.is_active() is False:
-            return self.error_cls(error="invalid_request", error_description="Code inactive")
+            return self.error_cls(error="invalid_grant", error_description="Code inactive")
 
         _auth_req = grant.authorization_request
 

@@ -266,6 +266,25 @@ class TestEndpoint(object):
         assert _info["token_class"] == "access_token"
         assert _info["sid"] == session_id
 
+    def test_iss_is_the_current_issuer(self):
+        """An application serving several issuers names the request's one; its
+        keys are registered under that issuer too, so the token still verifies."""
+        from idpyoidc.server.util import CURRENT_ISSUER
+
+        frontend_issuer = ISSUER + "/frontend-a"
+        self.server.keyjar.import_jwks(self.server.keyjar.export_jwks(private=True), frontend_issuer)
+        session_id = self._create_session(AUTH_REQ)
+        grant = self.context.authz(session_id=session_id, request=AUTH_REQ)
+        code = self._mint_token("authorization_code", grant, session_id)
+        marker = CURRENT_ISSUER.set(frontend_issuer)
+        try:
+            access_token = self._mint_token("access_token", grant, session_id, code)
+        finally:
+            CURRENT_ISSUER.reset(marker)
+
+        assert JWT(self.server.keyjar).unpack(access_token.value)["iss"] == frontend_issuer
+        assert self.session_manager.token_handler.info(access_token.value)["sid"] == session_id
+
     @pytest.mark.parametrize("enable_claims_per_client", [True, False])
     def test_enable_claims_per_client(self, enable_claims_per_client):
         # Set up configuration

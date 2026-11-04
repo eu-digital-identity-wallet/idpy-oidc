@@ -95,9 +95,8 @@ class Authorization(authorization.Authorization):
     }
 
     def __init__(self, upstream_get: Callable, **kwargs):
+        # The base class appends _do_request_uri and _post_parse_request.
         authorization.Authorization.__init__(self, upstream_get, **kwargs)
-        self.post_parse_request.append(self._do_request_uri)
-        self.post_parse_request.append(self._post_parse_request)
 
     def do_request_user(self, request_info, **kwargs):
         if proposed_user(request_info):

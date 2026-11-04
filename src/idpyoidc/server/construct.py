@@ -1,5 +1,4 @@
 import logging
-import re
 from functools import cmp_to_key
 
 from cryptojwt import jwe
@@ -9,6 +8,16 @@ ALG_SORT_ORDER = {"RS": 0, "ES": 1, "HS": 2, "PS": 3, "Ed": 4, "no": 5}
 WEAK_ALGS = ["RSA1_5", "none"]
 
 logger = logging.getLogger(__name__)
+
+
+def _is_alg_or_enc_list(attr: str) -> bool:
+    """Whether attr names a list of algorithms: "alg" or "enc" before "_values_supported".
+
+    Same strings as the regular expression ``.*(alg|enc).*_values_supported``
+    (with re.match), without its backtracking.
+    """
+    end = attr.rfind("_values_supported")
+    return end >= 0 and ("alg" in attr[:end] or "enc" in attr[:end])
 
 
 def sort_sign_alg(alg1, alg2):
@@ -77,7 +86,7 @@ def construct_provider_info(configuration_attributes, **kwargs):
             elif "encryption_enc_values_supported" in attr:
                 _info[attr] = assign_algorithms("encryption_enc")
 
-        if re.match(r".*(alg|enc).*_values_supported", attr):
+        if _is_alg_or_enc_list(attr):
             for i in _info[attr]:
                 if i in WEAK_ALGS:
                     logger.warning(

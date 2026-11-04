@@ -205,7 +205,7 @@ class StandAloneClient(Client):
             raise Unsupported(
                 "Could not pick a redirect_uri based on the given response_type and response_mode"
             )
-        except [MissingRequiredAttribute, ValueError]:
+        except (MissingRequiredAttribute, ValueError):
             raise
 
         request_args = {

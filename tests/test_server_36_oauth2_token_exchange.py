@@ -644,10 +644,11 @@ class TestEndpoint(object):
             {"headers": {"authorization": "Basic {}".format("Y2xpZW50XzE6aGVtbGlndA==")}},
         )
         _resp = self.endpoint.process_request(request=_req)
-        assert _resp["error"] == "invalid_request"
+        # RFC 6749 section 5.2: not allowed for this client
+        assert _resp["error"] == "unauthorized_client"
         assert (
             _resp["error_description"]
-            == "Unsupported grant_type: urn:ietf:params:oauth:grant-type:token-exchange"
+            == "grant_type not allowed for this client: urn:ietf:params:oauth:grant-type:token-exchange"
         )
 
     def test_wrong_resource(self):

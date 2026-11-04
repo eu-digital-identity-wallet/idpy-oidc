@@ -3,6 +3,7 @@ import importlib
 import json
 import logging
 import os
+import re
 import secrets
 import sys
 from typing import Union
@@ -35,8 +36,67 @@ def instantiate(cls, **kwargs):
         return cls(**kwargs)
 
 
-def sanitize(str):
-    return str
+#: Parameters whose values are secrets or bearer credentials; never logged.
+SENSITIVE_KEYS = frozenset(
+    {
+        "access_token",
+        "assertion",
+        "authorization",
+        "client_assertion",
+        "client_secret",
+        "code",
+        "code_verifier",
+        "d",
+        "dpop",
+        "id_token",
+        "jws",
+        "k",
+        "oauth-client-attestation",
+        "oauth-client-attestation-pop",
+        "password",
+        "pre-authorized_code",
+        "refresh_token",
+        "registration_access_token",
+        "token",
+        "tx_code",
+    }
+)
+REDACTED = "<redacted>"
+_KEYS_PATTERN = "|".join(re.escape(k) for k in sorted(SENSITIVE_KEYS, key=len, reverse=True))
+# key=value (query strings, form bodies)
+_KV_RE = re.compile(r"(?i)(?<![\w-])(" + _KEYS_PATTERN + r")=([^&\s'\",}]+)")
+# "key": "value" or 'key': 'value' (JSON, dict reprs)
+_QUOTED_RE = re.compile(
+    r"(?i)([\"'])(" + _KEYS_PATTERN + r")\1(\s*:\s*)([\"'])(.*?)(?<!\\)\4"
+)
+
+
+def sanitize(value):
+    """Returns ``value`` with secrets redacted, for logging.
+
+    Dicts and Messages are copied with the values of :data:`SENSITIVE_KEYS`
+    replaced; in strings, ``key=value`` and quoted ``"key": "value"`` pairs
+    are redacted and line breaks escaped (no forged log lines).
+    """
+    if hasattr(value, "to_dict"):
+        try:
+            value = value.to_dict()
+        except Exception:
+            value = str(value)
+    if isinstance(value, dict):
+        return {
+            k: (REDACTED if str(k).lower() in SENSITIVE_KEYS else sanitize(v)) for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return type(value)(sanitize(v) for v in value)
+    if isinstance(value, str):
+        value = _KV_RE.sub(lambda m: f"{m.group(1)}={REDACTED}", value)
+        value = _QUOTED_RE.sub(
+            lambda m: f"{m.group(1)}{m.group(2)}{m.group(1)}{m.group(3)}{m.group(4)}{REDACTED}{m.group(4)}",
+            value,
+        )
+        return value.replace("\r", "\\r").replace("\n", "\\n")
+    return value
 
 
 def load_yaml_config(filename):

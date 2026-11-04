@@ -446,8 +446,12 @@ class TestEndpoint(object):
 
         _te_request, _te_resp = self.do_query("token_exchange", "token", req_args, _state)
 
-        assert _te_resp["error"] == "invalid_request"
-        assert _te_resp["error_description"] == "Do not know how to handle this type of request"
+        # RFC 6749 section 5.2: the server does not support this grant type
+        assert _te_resp["error"] == "unsupported_grant_type"
+        assert (
+            _te_resp["error_description"]
+            == "Unsupported grant_type: urn:ietf:params:oauth:grant-type:token-exchange"
+        )
 
     def test_wrong_resource(self):
         """

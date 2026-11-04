@@ -107,11 +107,18 @@ def test_broken_cookie_signature():
 
 
 def test_parse_cookie():
-    kaka = "pyoidc=bjmc::1463043535::upm|" "1463043535|18a201305fa15a96ce4048e1fbb03f7715f86499"
+    # HMAC-SHA256 of the payload and timestamp (HMAC-SHA1 before).
+    kaka = "pyoidc=bjmc::1463043535::upm|" "1463043535|a2578d931910872d6800f3686f13837db14cede4c0ffe75bffb74357190b9563"
     seed = b""
     name = "pyoidc"
     result = parse_cookie(name, seed, kaka)
     assert result == ("bjmc::1463043535::upm", "1463043535")
+
+
+def test_sha1_signed_cookie_is_refused():
+    kaka = "pyoidc=bjmc::1463043535::upm|" "1463043535|18a201305fa15a96ce4048e1fbb03f7715f86499"
+    with pytest.raises(InvalidCookieSign):
+        parse_cookie("pyoidc", b"", kaka)
 
 
 def test_parse_manipulated_cookie_payload():

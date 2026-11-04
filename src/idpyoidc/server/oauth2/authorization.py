@@ -19,6 +19,7 @@ from idpyoidc.exception import ImproperlyConfigured
 from idpyoidc.exception import ParameterError
 from idpyoidc.exception import URIError
 from idpyoidc.message import Message
+from idpyoidc.server.util import current_issuer
 from idpyoidc.message import oauth2
 from idpyoidc.message.oauth2 import AuthorizationRequest
 from idpyoidc.message.oidc import AuthorizationResponse
@@ -370,6 +371,69 @@ class Authorization(Endpoint):
         self.allowed_request_algorithms = AllowedAlgorithms(ALG_PARAMS)
         self.resource_indicators_config = kwargs.get("resource_indicators", None)
 
+    #: Whether a request_uri from a pushed authorization request is resolved here
+    resolves_pushed_requests = True
+
+    def parse_request(
+        self,
+        request: Union[Message, dict, str],
+        http_info: Optional[dict] = None,
+        verify_args: Optional[dict] = None,
+        **kwargs,
+    ):
+        """Parses an authorization request, the pushed one when it names a
+        request_uri from the pushed authorization endpoint.
+
+        RFC 9126 section 4: the request then only needs client_id and
+        request_uri, so the pushed request replaces it before it is verified.
+        """
+        if self.resolves_pushed_requests:
+            _pushed = self._pushed_request(request)
+            if isinstance(_pushed, self.error_cls):
+                return _pushed
+            if _pushed is not None:
+                request = _pushed
+        return Endpoint.parse_request(self, request, http_info=http_info, verify_args=verify_args, **kwargs)
+
+    def _pushed_request(self, request):
+        """The pushed request a request_uri names (single use, RFC 9126 section 4).
+
+        :return: the pushed request, an error response (unknown, used or
+            expired request_uri, or another client_id), or None if the request
+            does not name a pushed request
+        """
+        if isinstance(request, str):
+            if self.request_format != "urlencoded":
+                return None
+            request = Message().from_urlencoded(request)
+        elif not isinstance(request, (dict, Message)):
+            return None
+
+        _request_uri = request.get("request_uri")
+        if not isinstance(_request_uri, str) or not _request_uri.startswith("urn:uuid:"):
+            return None
+        _endp = self.upstream_get("endpoint", "pushed_authorization")
+        if not _endp:
+            return None
+
+        _req = self.upstream_get("context").par_db.pop(_request_uri, None)  # One time usage
+        if _req is None or _endp.is_expired(_request_uri):
+            # RFC 9126 section 4 and RFC 9101 section 7: invalid_request_uri
+            return self.authentication_error_response(
+                request,
+                error="invalid_request_uri",
+                error_description="Unknown, used or expired request_uri",
+            )
+        # RFC 9126 section 2.2: bound to the client that pushed it; RFC 9101
+        # section 5: client_id is required alongside it.
+        if request.get("client_id") != _req.get("client_id"):
+            return self.authentication_error_response(
+                request,
+                error="invalid_request",
+                error_description="client_id does not match the pushed authorization request",
+            )
+        return _req
+
     def filter_request(self, context, req):
         return req
 
@@ -382,6 +446,17 @@ class Authorization(Endpoint):
         if _state:
             _error_msg["state"] = _state
         return _error_msg
+
+    @staticmethod
+    def server_supports_response_type(request: Union[Message, dict], context) -> bool:
+        _supported = context.provider_info.get("response_types_supported")
+        if not _supported:
+            return True
+        _requested = request["response_type"]
+        if isinstance(_requested, str):
+            _requested = _requested.split(" ")
+        _supported = [set(rt.split(" ")) if isinstance(rt, str) else set(rt) for rt in _supported]
+        return set(_requested) in _supported
 
     def verify_response_type(self, request: Union[Message, dict], cinfo: dict) -> bool:
         # Checking response types
@@ -418,18 +493,16 @@ class Authorization(Endpoint):
     def _do_request_uri(self, request, client_id, context, **kwargs):
         _request_uri = request.get("request_uri")
         if _request_uri:
-            # Do I do pushed authorization requests ?
-            _endp = self.upstream_get("endpoint", "pushed_authorization")
-            if _endp:
-                # Is it a UUID urn
-                if _request_uri.startswith("urn:uuid:"):
-                    _req = context.par_db.get(_request_uri)
-                    if _req:
-                        # One time usage
-                        del context.par_db[_request_uri]
-                        return _req
-                    else:
-                        raise ValueError("Got a request_uri I can not resolve")
+            # A pushed request's URI is resolved by parse_request, before
+            # verification; one left here was not, and is never fetched.
+            if _request_uri.startswith("urn:uuid:") and self.upstream_get(
+                "endpoint", "pushed_authorization"
+            ):
+                return self.authentication_error_response(
+                    request,
+                    error="invalid_request_uri",
+                    error_description="Unknown, used or expired request_uri",
+                )
 
             # Do I support request_uri ?
             if context.provider_info.get("request_uri_parameter_supported", True) is False:
@@ -503,18 +576,33 @@ class Authorization(Endpoint):
                 request, error="unauthorized_client", error_description="unknown client"
             )
 
-        # Is the asked for response_type among those that are permitted
+        if not request.get("response_type"):
+            return self.authentication_error_response(
+                request, error="invalid_request", error_description="Missing response_type"
+            )
+
+        # RFC 6749 section 4.1.2.1: a response type the server does not support
+        # is unsupported_response_type, one this client may not use is
+        # unauthorized_client.
+        if not self.server_supports_response_type(request, context):
+            return self.authentication_error_response(
+                request,
+                error="unsupported_response_type",
+                error_description="Unsupported response_type",
+            )
         if not self.verify_response_type(request, _cinfo):
             return self.authentication_error_response(
                 request,
-                error="invalid_request",
+                error="unauthorized_client",
                 error_description="Trying to use unregistered response_type",
             )
 
         # Get a verified redirect URI
         try:
             redirect_uri = get_uri(context, request, "redirect_uri", self.endpoint_type)
-        except (RedirectURIError, ParameterError) as err:
+        except (RedirectURIError, ParameterError, URIError, ValueError) as err:
+            # Fragment, unregistered query part, no match: invalid_request,
+            # never redirected (RFC 6749 sections 3.1.2 and 4.1.2.1).
             return self.authentication_error_response(
                 request,
                 error="invalid_request",
@@ -660,6 +748,8 @@ class Authorization(Endpoint):
         """
 
         res = self.pick_authn_method(request, redirect_uri, acr, **kwargs)
+        if "error" in res:  # e.g. access_denied, no usable authentication method
+            return res
 
         authn = res["method"]
         authn_class_ref = res["acr"]
@@ -828,7 +918,8 @@ class Authorization(Endpoint):
         response_info = self.error_response(response_info, request, error, error_description)
         if "return_uri" not in response_info:
             response_info["return_uri"] = request["redirect_uri"]
-        response_info = self.response_mode(request, **response_info)
+        if "response_mode" in request:
+            response_info = self.response_mode(request, **response_info)
         return response_info
 
     def create_authn_response(self, request: Union[dict, Message], sid: str) -> dict:
@@ -1092,7 +1183,7 @@ class Authorization(Endpoint):
 
         # Mix-Up mitigation
         if "response_args" in resp_info:
-            resp_info["response_args"]["iss"] = _context.issuer
+            resp_info["response_args"]["iss"] = current_issuer(_context)
             resp_info["response_args"]["client_id"] = request["client_id"]
 
         return resp_info
