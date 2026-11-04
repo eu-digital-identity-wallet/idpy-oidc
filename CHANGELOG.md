@@ -23,7 +23,7 @@
 - `token_args` (DPoP) raised `KeyError` for clients without a DPoP key; the token endpoint `kwargs` lookup raised `KeyError` when the endpoint had none.
 - Removed `print` calls that wrote client attestations, tokens, request headers and the authentication JWS to stdout; the raw WIA and PoP are no longer logged.
 
-## Unreleased
+## 0.2.0
 
 ### Added
 - `PushedAuthorization.purge_expired()` removes pushed requests that expired unredeemed.
